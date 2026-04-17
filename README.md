@@ -39,8 +39,8 @@ qvoid collections --remove vault
 With exactly one collection registered (or when you're inside the vault directory), `--collection` is inferred:
 
 ```bash
-qvoid index                                      # build index + embeddings
-qvoid index --no-embed                           # skip embeddings (faster, disables find-similar)
+qvoid index                                      # build the link index (JSONL)
+qvoid embed                                      # build embeddings from the index
 qvoid query --destination claim --origin Content/Claims
 qvoid query --semantic-type Supports --format detailed
 qvoid find-similar "seeing reality clearly" --top-k 5
