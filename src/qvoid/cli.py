@@ -56,21 +56,21 @@ def cmd_index(args: argparse.Namespace) -> int:
     col.data_dir.mkdir(parents=True, exist_ok=True)
     write_jsonl(links, col.jsonl_path)
     print(f"Wrote {len(links)} records → {col.jsonl_path}", file=sys.stderr)
+    return 0
 
-    if args.no_embed:
-        print("Skipping embeddings (--no-embed).", file=sys.stderr)
-        return 0
+
+def cmd_embed(args: argparse.Namespace) -> int:
+    col = resolve_collection(args.collection)
+    if not col.jsonl_path.exists():
+        print(f"No index found for collection {col.name!r}. Run `qvoid index` first.", file=sys.stderr)
+        return 1
 
     from .embeddings import build_vectors
 
+    links = read_jsonl(col.jsonl_path)
     model_name = col.config["embeddings"]["model"]
-    print(f"Embedding with {model_name}...", file=sys.stderr)
-    build_vectors(
-        (link.to_dict() for link in links),
-        col.vectors_path,
-        col.manifest_path,
-        model_name,
-    )
+    print(f"Embedding {len(links)} records with {model_name}...", file=sys.stderr)
+    build_vectors(iter(links), col.vectors_path, col.manifest_path, model_name)
     print(f"Wrote vectors → {col.vectors_path}", file=sys.stderr)
     return 0
 
@@ -204,8 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     pidx = sub.add_parser("index", help="Build/refresh the index for a collection.")
     pidx.add_argument("--collection", help="Collection name (default: CWD-detected or single registered).")
-    pidx.add_argument("--no-embed", action="store_true", help="Skip the embedding step.")
     pidx.set_defaults(func=cmd_index)
+
+    pe = sub.add_parser("embed", help="Build/refresh embeddings from an existing index.")
+    pe.add_argument("--collection", help="Collection name (default: CWD-detected or single registered).")
+    pe.set_defaults(func=cmd_embed)
 
     pq = sub.add_parser("query", help="Filter the index by origin, destination, semantic type, etc.")
     pq.add_argument("--collection")

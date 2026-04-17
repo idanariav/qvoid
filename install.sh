@@ -33,6 +33,12 @@ echo "Installing qvoid and dependencies (this may take a minute — torch is ~20
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
 "$VENV_DIR/bin/pip" install --quiet -e "$PROJECT_DIR"
 
+echo "Pre-downloading embedding model (one-time, ~25MB)"
+"$VENV_DIR/bin/python" - <<'PY'
+from sentence_transformers import SentenceTransformer
+SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+PY
+
 mkdir -p "$BIN_DIR"
 cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env bash

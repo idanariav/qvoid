@@ -1,8 +1,32 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import logging
+import os
 from pathlib import Path
 from typing import Iterable
+
+# The embedding model is a frozen dependency — never hit the Hub after first
+# download. Skips the staleness-check HEAD request (and its warning).
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+# Silence the HF/transformers progress bars and advisory messages.
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
+
+def _load_model(model_name: str):
+    """Load a SentenceTransformer model with the verbose load-report suppressed."""
+    from sentence_transformers import SentenceTransformer
+
+    # sentence-transformers / its BertModel wrapper prints a load report to
+    # stdout on every load. It's diagnostic noise for a stable frozen model.
+    for name in ("sentence_transformers", "transformers", "huggingface_hub"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+    with contextlib.redirect_stdout(io.StringIO()):
+        return SentenceTransformer(model_name)
 
 
 def _document_text(link: dict) -> str:
@@ -18,10 +42,9 @@ def _document_text(link: dict) -> str:
 
 def build_vectors(links: Iterable[dict], vectors_path: Path, manifest_path: Path, model_name: str) -> None:
     import numpy as np
-    from sentence_transformers import SentenceTransformer
 
     links_list = list(links)
-    model = SentenceTransformer(model_name)
+    model = _load_model(model_name)
     texts = [_document_text(link) for link in links_list]
     vectors = model.encode(texts, batch_size=64, show_progress_bar=True, normalize_embeddings=True)
 
@@ -40,7 +63,6 @@ def build_vectors(links: Iterable[dict], vectors_path: Path, manifest_path: Path
 def find_similar(query: str, vectors_path: Path, manifest_path: Path,
                  top_k: int = 10, min_score: float = 0.0) -> list[tuple[str, float]]:
     import numpy as np
-    from sentence_transformers import SentenceTransformer
 
     manifest = json.loads(manifest_path.read_text())
     vectors = np.load(vectors_path)
@@ -49,7 +71,7 @@ def find_similar(query: str, vectors_path: Path, manifest_path: Path,
     if query in order:
         q_vec = vectors[order.index(query)]
     else:
-        model = SentenceTransformer(manifest["model"])
+        model = _load_model(manifest["model"])
         q_vec = model.encode([query], normalize_embeddings=True)[0]
 
     scores = vectors @ q_vec
