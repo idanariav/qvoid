@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qvoid"
+version = "0.1.0"
+description = "Index, query, and dedup unresolved wikilinks across Obsidian-style vaults."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Idan Ariav" }]
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "sentence-transformers>=2.5",
+    "tomli-w>=1.0",
+]
+
+[project.scripts]
+qvoid = "qvoid.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+qvoid = ["../defaults/*.toml"]
