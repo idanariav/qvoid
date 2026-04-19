@@ -15,23 +15,44 @@ from .paths import (
 
 DEFAULT_COLLECTION_CONFIG: dict = {
     "source": {
-        "type": "obsidian",
+        # Only index links found in files under these folder prefixes (relative to vault root).
+        # Empty list means index all folders.
+        "origin_folders": [],
+        # Regex with one capture group matching the annotation name immediately before a wikilink.
+        # Default matches Dataview inline-field syntax: (Key:: [[target]]
+        # Set to "" to disable annotation extraction entirely.
+        "annotation_pattern": r"\(([A-Za-z]+)::\s*$",
+        # Links whose target ends with one of these extensions are excluded before indexing.
+        "exclude_extensions": [
+            ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
+            ".excalidraw", ".pdf", ".mp4", ".mov", ".mp3", ".wav", ".zip",
+        ],
     },
     "classifier": {
-        # Folders whose unresolved links are overwhelmingly citations (not claims).
-        # Occurrences here without a semantic annotation get biased toward `source`.
-        # Sources/Books is intentionally omitted — books are a legitimate origin
-        # for claim-shaped unresolved links in this workflow.
-        "citation_folders": [
-            "Sources/Articles",
-            "Sources/Journals",
-            "Sources/Lectures",
-            "Sources/Courses",
-        ],
-        # Annotations that strongly imply the target is a claim.
+        # Links classified as these types are dropped from the index after classification.
+        # Valid types: person, date, idea, file, template, unknown
+        "exclude_types": [],
+        # Folders whose unresolved links are overwhelmingly citations.
+        # Occurrences here without a semantic annotation add +1 to the idea confidence boost.
+        # Defaults to empty — set explicitly for your vault if needed.
+        "citation_folders": [],
+        # Annotations that strongly imply the target is an idea (boost score +3).
         "claim_annotations": ["Supports", "Opposes", "Weakens", "Reminds"],
-        # Annotations that could be either claim or concept (title heuristic decides).
+        # Annotations that suggest the target is an idea (boost score +1).
         "claim_or_concept_annotations": ["Jump", "Related", "Aka"],
+        # Link-name prefix that identifies a person note (e.g. "@Alice").
+        # Set to "" to disable the person heuristic.
+        "person_prefix": "@",
+        # Toggle individual title heuristics on/off.
+        "heuristics": {
+            "date": True,
+            "person": True,
+            "file_extensions": True,
+            "camelcase": True,
+            "template": True,
+            "capitalization": True,
+            "min_words_for_idea": 4,
+        },
     },
     "embeddings": {
         "model": "sentence-transformers/all-MiniLM-L6-v2",
@@ -61,6 +82,10 @@ class Collection:
     def manifest_path(self) -> Path:
         return self.data_dir / "manifest.json"
 
+    @property
+    def scan_manifest_path(self) -> Path:
+        return self.data_dir / "scan_manifest.json"
+
 
 def _read_toml(path: Path) -> dict:
     with path.open("rb") as fh:
@@ -75,9 +100,16 @@ def _write_toml(path: Path, data: dict) -> None:
 
 def _merge_defaults(cfg: dict) -> dict:
     merged = {}
-    for section, defaults in DEFAULT_COLLECTION_CONFIG.items():
-        merged[section] = {**defaults, **(cfg.get(section) or {})}
-    # Carry over any unknown sections untouched so forward-compat configs don't get dropped.
+    for section, section_defaults in DEFAULT_COLLECTION_CONFIG.items():
+        user_section = cfg.get(section) or {}
+        merged_section = dict(section_defaults)
+        for key, user_val in user_section.items():
+            default_val = section_defaults.get(key)
+            if isinstance(default_val, dict) and isinstance(user_val, dict):
+                merged_section[key] = {**default_val, **user_val}
+            else:
+                merged_section[key] = user_val
+        merged[section] = merged_section
     for section, value in cfg.items():
         if section not in merged:
             merged[section] = value
@@ -94,6 +126,14 @@ def load_registry() -> dict:
 
 def save_registry(registry: dict) -> None:
     _write_toml(registry_path(), registry)
+
+
+def update_collection_config(name: str, section: str, updates: dict) -> None:
+    """Merge updates into one section of a collection's TOML config."""
+    cfg_path = collection_config_path(name)
+    cfg = _read_toml(cfg_path) if cfg_path.exists() else {}
+    cfg.setdefault(section, {}).update(updates)
+    _write_toml(cfg_path, cfg)
 
 
 def register_collection(name: str, path: Path) -> None:

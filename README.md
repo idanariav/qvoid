@@ -4,7 +4,7 @@ Index, query, and dedup unresolved wikilinks across Obsidian-style vaults.
 
 Solves two problems with unresolved links:
 
-- **Noise** — every uncreated wikilink looks the same. `qvoid` classifies each target as `claim`, `concept`, `person`, `source`, `date`, `util`, or `unknown` and lets you filter by that class and by origin folder.
+- **Noise** — every uncreated wikilink looks the same. `qvoid` classifies each target as `idea`, `person`, `date`, `file`, `template`, or `unknown`, and lets you filter by type, origin folder, and annotation.
 - **Inaccuracy** — each occurrence is enriched with the surrounding sentence and any inline semantic annotation (`Supports::`, `Related::`, `Jump::`, …). An embedding layer surfaces near-duplicate targets so you don't create two notes for the same idea.
 
 ## Install
@@ -19,80 +19,193 @@ cd ~/GitProjects/qvoid
 
 Make sure `~/.local/bin` is on your `PATH`.
 
-## Register a collection
+## Quickstart
 
 ```bash
-qvoid init --name vault --path ~/GitProjects/Obsidian_Vault
+# 1. Register your vault
+qvoid init --name vault --path ~/my-vault
+
+# 2. (Optional) Restrict which folders are scanned
+qvoid collection vault --origin-folders Sources/Articles Sources/Journals
+
+# 3. Build the index
+qvoid index
+
+# 4. Query
+qvoid query --destination idea
+qvoid query --destination idea --min-occurrences 2 --format detailed
+
+# 5. Find near-duplicates
+qvoid embed
+qvoid find-similar --cluster
 ```
 
-This registers the collection in `~/.config/qvoid/collections.toml` and creates a per-collection config at `~/.config/qvoid/collections/vault.toml`. Edit that file to tune vault-specific settings (citation folders, semantic annotations, embedding model).
+## Commands
 
-List collections:
+### `init`
+
+Register a vault as a named collection:
+
+```bash
+qvoid init --name vault --path ~/my-vault
+```
+
+Creates a per-collection config at `~/.config/qvoid/collections/vault.toml`. All settings have sensible defaults — edit only what you need to change.
+
+### `collections`
+
+List or remove registered collections:
 
 ```bash
 qvoid collections
 qvoid collections --remove vault
 ```
 
-## Usage
+### `collection`
 
-With exactly one collection registered (or when you're inside the vault directory), `--collection` is inferred:
+View or adjust settings for a specific collection:
 
 ```bash
-qvoid index                                      # build the link index (JSONL)
-qvoid embed                                      # build embeddings from the index
-qvoid query --destination claim --origin Content/Claims
+qvoid collection vault                                          # show current settings
+qvoid collection vault --origin-folders Sources/A Sources/B    # restrict scan to these folders
+qvoid collection vault --origin-folders                        # clear filter (scan all folders)
+```
+
+`origin_folders` restricts which vault folders are scanned for unresolved links at index time. Useful when only a subset of your vault contains the kind of links you care about classifying. Empty (default) means index everything.
+
+### `index`
+
+Build or refresh the link index:
+
+```bash
+qvoid index
+qvoid index --collection vault   # explicit collection name
+```
+
+Reads `.md` files directly — no external tools required. Subsequent runs are **incremental**: only files whose modification time changed since the last run are rescanned. Links whose target `.md` file has since been created are automatically dropped.
+
+### `embed`
+
+Build embeddings from the current index (required for `find-similar`):
+
+```bash
+qvoid embed
+```
+
+### `query`
+
+Filter the index by type, origin folder, annotation, or free-text search:
+
+```bash
+qvoid query --destination idea
+qvoid query --destination idea --origin Sources/Articles
+qvoid query --destination idea --min-occurrences 3 --format detailed
 qvoid query --semantic-type Supports --format detailed
+qvoid query --search "cognitive bias" --limit 20
+qvoid query --format json | jq '.target'
+```
+
+| Flag | Description |
+|---|---|
+| `--destination` | Filter by type: `idea`, `person`, `date`, `file`, `template`, `unknown` |
+| `--origin` | Source path prefix (e.g. `Sources/Articles`) |
+| `--semantic-type` | Match a specific inline annotation (e.g. `Supports`) |
+| `--min-occurrences` | Minimum number of occurrences across the vault |
+| `--search` | Substring match on target name or surrounding context |
+| `--limit` | Cap result count |
+| `--format` | `summary` (default), `detailed`, or `json` |
+
+### `find-similar`
+
+Find semantically similar unresolved targets using embeddings:
+
+```bash
 qvoid find-similar "seeing reality clearly" --top-k 5
-qvoid find-similar --cluster --threshold 0.85
+qvoid find-similar --cluster                     # group suspected duplicates
+qvoid find-similar --cluster --threshold 0.85    # stricter clustering
 ```
 
-With multiple collections, pass `--collection <name>` or set `QVOID_COLLECTION=<name>`.
+Run `qvoid embed` first.
 
-## Data layout
+## Types
 
-- Config: `~/.config/qvoid/collections.toml` + `~/.config/qvoid/collections/<name>.toml`
-- Index:  `~/.local/share/qvoid/<name>/unresolved_links.jsonl`
-- Vectors: `~/.local/share/qvoid/<name>/vectors.npy` + `manifest.json`
-
-Nothing is written inside the vault itself.
-
-## Collection config
-
-Every field is optional; omitted keys fall back to the defaults below.
-
-```toml
-[source]
-type = "obsidian"  # only supported source for now
-
-[classifier]
-# Folders whose unresolved links are overwhelmingly citations, not claims.
-# Occurrences here without a semantic annotation get biased toward `source`.
-citation_folders = [
-    "Sources/Articles",
-    "Sources/Journals",
-    "Sources/Lectures",
-    "Sources/Courses",
-]
-
-# Annotations that strongly imply the target is a claim.
-claim_annotations = ["Supports", "Opposes", "Weakens", "Reminds"]
-
-# Annotations that could be either claim or concept (title heuristic decides).
-claim_or_concept_annotations = ["Jump", "Related", "Aka"]
-
-[embeddings]
-model = "sentence-transformers/all-MiniLM-L6-v2"
-```
+| Type | Meaning | Primary signals |
+|---|---|---|
+| `idea` | A concept, claim, or source worth capturing as a note | word count, capitalization, annotation context |
+| `person` | A person link | configurable prefix (default `@`) |
+| `date` | A date reference | ISO date, week, quarter patterns |
+| `file` | A resource link, not a note | file extension, `/` in target, CamelCase |
+| `template` | A template artifact | `<% %>`, `{{ }}` syntax |
+| `unknown` | Could not classify | fallback |
 
 ## Classifier
 
 Two passes:
 
-1. **Title heuristics** — `@name` → person, `YYYY-MM-DD` → date, ALL CAPS / `(2024)` / `et al.` → source, file extension or `/` in title → util, CamelCase → util, long sentence-case → claim, short title case → concept.
-2. **Context boost** — inline annotations (`Supports::`, etc.) bias toward `claim`; occurrences in `citation_folders` without an annotation bias toward `source`. High-confidence title matches override the boost.
+1. **Title heuristics** — structural signals (person prefix, ISO date, file extension, template syntax) are high-confidence and always respected. Capitalization patterns (ALL-CAPS, year in parens, et al.) signal a high-confidence idea. Word count provides a medium/low-confidence idea baseline. Each heuristic can be toggled via `[classifier.heuristics]`.
+2. **Context boost** — inline annotations (`Supports::` etc., pattern configurable) score each occurrence. Score ≥ 3 → high-confidence idea; score ≥ 1 → medium. High-confidence title matches are never overridden.
+
+## Data layout
+
+All data lives outside the vault:
+
+- Config: `~/.config/qvoid/collections/<name>.toml`
+- Index: `~/.local/share/qvoid/<name>/unresolved_links.jsonl`
+- Scan manifest: `~/.local/share/qvoid/<name>/scan_manifest.json`
+- Vectors: `~/.local/share/qvoid/<name>/vectors.npy` + `manifest.json`
+
+## Collection config
+
+Every field is optional; omitted keys fall back to the defaults shown below.
+
+```toml
+[source]
+# Restrict which vault folders are scanned (relative to vault root).
+# Empty list (default) scans everything.
+origin_folders = []
+
+# Regex with one capture group matching the annotation name before a wikilink.
+# Default: Dataview inline-field syntax — (Key:: [[target]]
+# Set to "" to disable annotation extraction.
+annotation_pattern = '\(([A-Za-z]+)::\s*$'
+
+# Targets with these extensions are excluded before indexing.
+# Remove entries to allow them through; add entries to block more.
+exclude_extensions = [
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
+    ".excalidraw", ".pdf", ".mp4", ".mov", ".mp3", ".wav", ".zip",
+]
+
+[classifier]
+# Drop links classified as these types from the index entirely.
+# Valid values: idea, person, date, file, template, unknown
+exclude_types = []
+
+# Folders whose unannotated occurrences add +1 to the idea confidence score.
+citation_folders = []
+
+# Inline annotations and their confidence boost.
+claim_annotations = ["Supports", "Opposes", "Weakens", "Reminds"]  # +3
+claim_or_concept_annotations = ["Jump", "Related", "Aka"]           # +1
+
+# Prefix that marks a person link (e.g. "@Alice"). Set to "" to disable.
+person_prefix = "@"
+
+[classifier.heuristics]
+# Toggle individual detection rules. Partial overrides are merged with defaults.
+date = true             # ISO date/week/quarter patterns → date
+person = true           # person_prefix links → person
+file_extensions = true  # targets with a file extension or "/" → file
+camelcase = true        # CamelCase single words → file (medium confidence)
+template = true         # template syntax → template
+capitalization = true   # ALL-CAPS, (YEAR), et al. → high-confidence idea
+min_words_for_idea = 4  # ≥ N title-case words → medium-confidence idea; 0 = disabled
+
+[embeddings]
+model = "sentence-transformers/all-MiniLM-L6-v2"
+```
 
 ## Requirements
 
 - Python 3.11+
-- Obsidian with the [obsidian CLI](https://help.obsidian.md/cli) available on PATH (the `index` command calls `obsidian unresolved verbose format=json`)
+- No external tools required — `qvoid index` reads `.md` files directly from disk.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Iterable
 
 from .models import Occurrence, TitleFeatures
@@ -10,14 +11,40 @@ YEAR_IN_PARENS_RE = re.compile(r"\(\d{4}\)")
 TEMPLATE_SYNTAX_RE = re.compile(r"<%|%>|\{\{|\}\}")
 CAMELCASE_RE = re.compile(r"^[A-Z][a-z]+([A-Z][a-z]+)+$")
 ET_AL_RE = re.compile(r"\bet\s+al\.?", re.IGNORECASE)
-FILE_EXT_RE = re.compile(r"\.(webp|png|jpe?g|gif|svg|excalidraw|pdf|mp4|mov|mp3|wav|zip)$", re.IGNORECASE)
+FILE_EXT_RE = re.compile(r"\.\w+$")
+
+TYPES = frozenset(["person", "date", "idea", "file", "template", "unknown"])
 
 
-def title_features(target: str) -> TitleFeatures:
+@dataclass
+class Heuristics:
+    date: bool = True
+    person: bool = True
+    file_extensions: bool = True   # targets with a file extension or "/" → file
+    camelcase: bool = True         # CamelCase single word → file (medium confidence)
+    template: bool = True          # template syntax → template
+    capitalization: bool = True    # ALL-CAPS, (YEAR), et al. → high-confidence idea
+    min_words_for_idea: int = 4    # ≥ N title-case words → medium-confidence idea; 0 = disabled
+
+
+def _heuristics_from_config(cc: dict) -> Heuristics:
+    h = cc.get("heuristics") or {}
+    return Heuristics(
+        date=h.get("date", True),
+        person=h.get("person", True),
+        file_extensions=h.get("file_extensions", True),
+        camelcase=h.get("camelcase", True),
+        template=h.get("template", True),
+        capitalization=h.get("capitalization", True),
+        min_words_for_idea=h.get("min_words_for_idea", 4),
+    )
+
+
+def title_features(target: str, person_prefix: str = "@") -> TitleFeatures:
     words = target.split()
     return TitleFeatures(
         word_count=len(words),
-        has_person_prefix=target.startswith("@"),
+        has_person_prefix=bool(person_prefix) and target.startswith(person_prefix),
         is_date=bool(DATE_RE.match(target.strip())),
         is_all_caps=target.isupper() and any(c.isalpha() for c in target),
         is_short_camelcase=len(words) == 1 and bool(CAMELCASE_RE.match(target)),
@@ -26,73 +53,66 @@ def title_features(target: str) -> TitleFeatures:
     )
 
 
-def _heuristic_class(target: str, feats: TitleFeatures) -> tuple[str, str]:
-    """Pass 1: title-only heuristics. Returns (class, confidence)."""
+def _heuristic_class(target: str, feats: TitleFeatures, h: Heuristics) -> tuple[str, str]:
+    """Pass 1: title-only heuristics → (type, confidence)."""
     t = target.strip()
 
-    if feats.has_template_syntax:
-        return "util", "high"
-    if FILE_EXT_RE.search(t) or "/" in t:
-        return "util", "high"
-    if feats.has_person_prefix:
+    if h.template and feats.has_template_syntax:
+        return "template", "high"
+    if h.file_extensions and (FILE_EXT_RE.search(t) or "/" in t):
+        return "file", "high"
+    if h.person and feats.has_person_prefix:
         return "person", "high"
-    if feats.is_date:
+    if h.date and feats.is_date:
         return "date", "high"
-    if feats.is_all_caps or feats.has_year_in_parens or ET_AL_RE.search(t):
-        return "source", "high"
-    if feats.is_short_camelcase:
-        return "util", "medium"
-    if feats.word_count >= 4 and t[:1].isupper() and not t.isupper():
-        return "claim", "medium"
-    if 1 <= feats.word_count <= 3:
-        return "concept", "low"
+    if h.capitalization and (feats.is_all_caps or feats.has_year_in_parens or ET_AL_RE.search(t)):
+        return "idea", "high"
+    if h.camelcase and feats.is_short_camelcase:
+        return "file", "medium"
+    if h.min_words_for_idea > 0 and feats.word_count >= h.min_words_for_idea and t[:1].isupper() and not t.isupper():
+        return "idea", "medium"
+    if feats.word_count >= 1:
+        return "idea", "low"
     return "unknown", "low"
 
 
 class Classifier:
-    """Two-pass classifier. Vault-specific conventions (semantic annotations,
-    citation folders) come from the collection config — nothing hardcoded here."""
-
     def __init__(self, config: dict):
         cc = config.get("classifier", {}) if config else {}
         self.citation_folders: tuple[str, ...] = tuple(cc.get("citation_folders", []))
         self.claim_annotations: frozenset[str] = frozenset(cc.get("claim_annotations", []))
-        self.claim_or_concept_annotations: frozenset[str] = frozenset(cc.get("claim_or_concept_annotations", []))
+        self.idea_annotations: frozenset[str] = frozenset(cc.get("claim_or_concept_annotations", []))
+        self.person_prefix: str = cc.get("person_prefix", "@")
+        self.heuristics: Heuristics = _heuristics_from_config(cc)
 
-    def _context_signals(self, occurrences: Iterable[Occurrence]) -> dict[str, int]:
-        signals = {"claim": 0, "concept": 0, "source": 0}
+    def _context_boost(self, occurrences: Iterable[Occurrence]) -> int:
+        """Score how strongly context signals suggest this is an idea worth capturing."""
+        score = 0
         for occ in occurrences:
             if occ.semantic_type in self.claim_annotations:
-                signals["claim"] += 3
-            elif occ.semantic_type in self.claim_or_concept_annotations:
-                signals["claim"] += 1
-                signals["concept"] += 1
-            if self.citation_folders and any(
-                occ.source_folder.startswith(sf) for sf in self.citation_folders
-            ) and not occ.semantic_type:
-                signals["source"] += 1
-        return signals
+                score += 3
+            elif occ.semantic_type in self.idea_annotations:
+                score += 1
+            if (
+                self.citation_folders
+                and any(occ.source_folder.startswith(sf) for sf in self.citation_folders)
+                and not occ.semantic_type
+            ):
+                score += 1
+        return score
 
     def classify(self, target: str, occurrences: list[Occurrence]) -> tuple[str, str, TitleFeatures]:
-        feats = title_features(target)
-        base_class, base_conf = _heuristic_class(target, feats)
+        feats = title_features(target, self.person_prefix)
+        base_class, base_conf = _heuristic_class(target, feats, self.heuristics)
 
         if base_conf == "high":
             return base_class, base_conf, feats
 
-        signals = self._context_signals(occurrences)
-        if not any(signals.values()):
+        boost = self._context_boost(occurrences)
+        if boost == 0:
             return base_class, base_conf, feats
 
-        winner = max(signals.items(), key=lambda kv: kv[1])
-        if winner[1] == 0:
-            return base_class, base_conf, feats
-
-        boosted_class = winner[0]
-        if boosted_class == base_class:
-            return base_class, "high", feats
-        if base_conf == "low":
-            return boosted_class, "medium", feats
-        if {base_class, boosted_class} <= {"claim", "concept"}:
-            return boosted_class, "medium", feats
-        return base_class, base_conf, feats
+        # Context signals always upgrade toward "idea"
+        if boost >= 3:
+            return "idea", "high", feats
+        return "idea", "medium", feats

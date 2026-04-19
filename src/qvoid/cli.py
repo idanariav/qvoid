@@ -8,9 +8,11 @@ from pathlib import Path
 from .classifier import Classifier
 from .config import (
     list_collections,
+    load_collection,
     register_collection,
     remove_collection,
     resolve_collection,
+    update_collection_config,
 )
 from .indexer import build_index, read_jsonl, write_jsonl
 from .paths import collection_config_path
@@ -25,7 +27,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     cfg_path = collection_config_path(args.name)
     print(f"Registered collection {args.name!r} → {path}")
     print(f"Config: {cfg_path}")
-    print("Edit the config to tune citation_folders / semantic annotations for this vault.")
+    print("Edit the config or use `qvoid collection` to tune origin_folders, annotations, etc.")
     return 0
 
 
@@ -52,10 +54,44 @@ def cmd_index(args: argparse.Namespace) -> int:
     classifier = Classifier(col.config)
 
     print(f"Indexing collection {col.name!r} at {col.path}", file=sys.stderr)
-    links = build_index(col.path, col.config, classifier)
     col.data_dir.mkdir(parents=True, exist_ok=True)
+    links = build_index(
+        col.path,
+        col.config,
+        classifier,
+        existing_jsonl=col.jsonl_path,
+        scan_manifest_path=col.scan_manifest_path,
+    )
     write_jsonl(links, col.jsonl_path)
     print(f"Wrote {len(links)} records → {col.jsonl_path}", file=sys.stderr)
+    return 0
+
+
+def cmd_collection(args: argparse.Namespace) -> int:
+    try:
+        col = load_collection(args.name)
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    if args.origin_folders is not None:
+        folders = args.origin_folders
+        update_collection_config(args.name, "source", {"origin_folders": folders})
+        if folders:
+            print(f"origin_folders for {args.name!r} set to: {folders}")
+        else:
+            print(f"origin_folders for {args.name!r} cleared (all folders indexed).")
+        return 0
+
+    # No action flag — show current settings
+    src = col.config.get("source", {})
+    clf = col.config.get("classifier", {})
+    print(f"Collection:       {col.name}")
+    print(f"Vault path:       {col.path}")
+    print(f"origin_folders:   {src.get('origin_folders', []) or '(all folders)'}")
+    print(f"citation_folders: {clf.get('citation_folders', []) or '(none)'}")
+    print(f"person_prefix:    {clf.get('person_prefix', '@')!r}")
+    print(f"annotation_pattern: {src.get('annotation_pattern', '')!r}")
     return 0
 
 
@@ -202,6 +238,21 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--remove", metavar="NAME", help="Remove a registered collection.")
     pc.set_defaults(func=cmd_collections)
 
+    pcol = sub.add_parser("collection", help="Show or configure a specific collection.")
+    pcol.add_argument("name", help="Collection name.")
+    pcol.add_argument(
+        "--origin-folders",
+        nargs="*",
+        metavar="FOLDER",
+        dest="origin_folders",
+        help=(
+            "Set which vault folders are scanned for unresolved links. "
+            "Pass one or more folder prefixes (relative to vault root). "
+            "Pass no folders to clear the filter and index everything."
+        ),
+    )
+    pcol.set_defaults(func=cmd_collection)
+
     pidx = sub.add_parser("index", help="Build/refresh the index for a collection.")
     pidx.add_argument("--collection", help="Collection name (default: CWD-detected or single registered).")
     pidx.set_defaults(func=cmd_index)
@@ -213,7 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     pq = sub.add_parser("query", help="Filter the index by origin, destination, semantic type, etc.")
     pq.add_argument("--collection")
     pq.add_argument("--origin", help="Source path prefix (e.g. Content/Claims).")
-    pq.add_argument("--destination", choices=["claim", "concept", "person", "source", "date", "util", "unknown"])
+    pq.add_argument("--destination", choices=["person", "date", "idea", "file", "template", "unknown"])
     pq.add_argument("--semantic-type", help="Match inline annotation (Supports, Related, Jump, …).")
     pq.add_argument("--min-occurrences", type=int)
     pq.add_argument("--search", help="Substring match on target or surrounding context.")
