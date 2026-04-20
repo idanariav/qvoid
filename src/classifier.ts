@@ -8,6 +8,7 @@ const CAMELCASE_RE = /^[A-Z][a-z]+([A-Z][a-z]+)+$/;
 const ET_AL_RE = /\bet\s+al\.?/i;
 const FILE_EXT_RE = /\.\w+$/;
 const VERB_RE = /\b(is|are|was|were|be|does|do|did|improves|boosts|affects|helps|makes|creates)\b/i;
+const TITLE_CASE_WORD_RE = /^[A-Z][a-z]+$/;
 
 export interface Heuristics {
   date: boolean;
@@ -48,6 +49,7 @@ export function titleFeatures(target: string, personPrefix: string): TitleFeatur
     has_year_in_parens: YEAR_IN_PARENS_RE.test(target),
     has_template_syntax: TEMPLATE_SYNTAX_RE.test(target),
     has_verb: VERB_RE.test(target),
+    is_title_case_name: words.length >= 2 && words.length <= 3 && words.every(w => TITLE_CASE_WORD_RE.test(w)),
   };
 }
 
@@ -57,6 +59,7 @@ function heuristicClass(target: string, feats: TitleFeatures, h: Heuristics): [s
   if (h.template && feats.has_template_syntax) return ["template", "high"];
   if (h.file_extensions && (FILE_EXT_RE.test(t) || t.includes("/"))) return ["file", "high"];
   if (h.person && feats.has_person_prefix) return ["person", "high"];
+  if (h.person && feats.is_title_case_name) return ["person", "medium"];
   if (h.date && feats.is_date) return ["date", "high"];
   // Academic citation signals → always strong idea indicators
   if (feats.has_year_in_parens || ET_AL_RE.test(t)) return ["idea", "high"];
