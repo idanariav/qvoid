@@ -33,12 +33,9 @@ This exposes four tools: `query`, `find_similar`, `cluster`, `status`.
 
 ```bash
 # 1. Register your vault
-qvoid init --name vault --path ~/my-vault
+qvoid collection vault --path ~/my-vault
 
-# 2. (Optional) Restrict which folders are scanned
-qvoid collection vault --origin-folders Sources/Articles Sources/Journals
-
-# 3. Build the index
+# 2. Build the index
 qvoid index
 
 # 4. Query
@@ -52,16 +49,6 @@ qvoid find-similar --cluster
 
 ## Commands
 
-### `init`
-
-Register a vault as a named collection:
-
-```bash
-qvoid init --name vault --path ~/my-vault
-```
-
-Creates a per-collection config at `~/.config/qvoid/collections/vault.toml`. All settings have sensible defaults — edit only what you need to change.
-
 ### `collections`
 
 List or remove registered collections:
@@ -73,15 +60,12 @@ qvoid collections --remove vault
 
 ### `collection`
 
-View or adjust settings for a specific collection:
+Register a vault as a named collection, or view its current settings:
 
 ```bash
-qvoid collection vault                                          # show current settings
-qvoid collection vault --origin-folders Sources/A Sources/B    # restrict scan to these folders
-qvoid collection vault --origin-folders                        # clear filter (scan all folders)
+qvoid collection vault --path ~/my-vault   # register (creates ~/.config/qvoid/collections/vault.toml)
+qvoid collection vault                     # show current settings
 ```
-
-`origin_folders` restricts which vault folders are scanned for unresolved links at index time. Useful when only a subset of your vault contains the kind of links you care about classifying. Empty (default) means index everything.
 
 ### `index`
 
@@ -170,10 +154,6 @@ Every field is optional; omitted keys fall back to the defaults shown below.
 
 ```toml
 [source]
-# Restrict which vault folders are scanned (relative to vault root).
-# Empty list (default) scans everything.
-origin_folders = []
-
 # Regex with one capture group matching the annotation name before a wikilink.
 # Default: Dataview inline-field syntax — (Key:: [[target]]
 # Set to "" to disable annotation extraction.

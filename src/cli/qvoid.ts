@@ -118,42 +118,10 @@ function flagNum(v: string | boolean | undefined, fallback?: number): number | u
   return isNaN(n) ? fallback : n;
 }
 
-function flagStrArr(v: string | boolean | undefined): string[] | undefined {
-  if (v === true) return [];
-  if (typeof v === "string") return [v];
-  return undefined;
-}
-
-// --origin-folders accepts multiple values: we collect all remaining positionals
-// that follow the flag. We handle this as a special case in the collection command.
-function collectMultiFlag(argv: string[], flagName: string): string[] | undefined {
-  const flagIdx = argv.indexOf(`--${flagName}`);
-  if (flagIdx === -1) return undefined;
-  const values: string[] = [];
-  for (let i = flagIdx + 1; i < argv.length; i++) {
-    if (argv[i]!.startsWith("--")) break;
-    values.push(argv[i]!);
-  }
-  return values;
-}
 
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
-
-function cmdInit(argv: string[]): void {
-  const { flags } = parseArgs(argv);
-  const name = flagStr(flags["name"]);
-  const vaultPath = flagStr(flags["path"]);
-  if (!name || !vaultPath) {
-    console.error("Usage: qvoid init --name <name> --path <vault-path>");
-    process.exit(1);
-  }
-  const resolved = path.resolve(vaultPath);
-  registerCollection(name, resolved);
-  console.log(`Registered collection ${JSON.stringify(name)} → ${resolved}`);
-  console.log(`Edit ~/.config/qvoid/collections/${name}.toml to tune settings.`);
-}
 
 function cmdCollections(argv: string[]): void {
   const { flags } = parseArgs(argv);
@@ -169,7 +137,7 @@ function cmdCollections(argv: string[]): void {
   }
   const cols = listCollections();
   if (Object.keys(cols).length === 0) {
-    console.log("No collections registered. Run `qvoid init --name <n> --path <vault>`.");
+    console.log("No collections registered. Run `qvoid collection <name> --path <vault>`.");
     return;
   }
   const width = Math.max(...Object.keys(cols).map((n) => n.length));
@@ -179,29 +147,27 @@ function cmdCollections(argv: string[]): void {
 }
 
 function cmdCollection(argv: string[]): void {
+  const { flags } = parseArgs(argv);
   const name = argv[0];
   if (!name) {
-    console.error("Usage: qvoid collection <name> [--origin-folders [folder...]]");
+    console.error("Usage: qvoid collection <name> --path <vault-path>");
     process.exit(1);
   }
-  const col = loadCollection(name);
-  const originFolders = collectMultiFlag(argv.slice(1), "origin-folders");
-  if (originFolders !== undefined) {
-    updateCollectionConfig(name, "source", { origin_folders: originFolders });
-    if (originFolders.length > 0) {
-      console.log(`origin_folders for ${JSON.stringify(name)} set to: ${JSON.stringify(originFolders)}`);
-    } else {
-      console.log(`origin_folders for ${JSON.stringify(name)} cleared (all folders indexed).`);
-    }
+  const vaultPath = flagStr(flags["path"]);
+  if (vaultPath !== undefined) {
+    const resolved = path.resolve(vaultPath);
+    registerCollection(name, resolved);
+    console.log(`Registered collection ${JSON.stringify(name)} → ${resolved}`);
+    console.log(`Edit ~/.config/qvoid/collections/${name}.toml to tune settings.`);
     return;
   }
+  const col = loadCollection(name);
   const src = col.config.source;
   const clf = col.config.classifier;
-  console.log(`Collection:       ${col.name}`);
-  console.log(`Vault path:       ${col.path}`);
-  console.log(`origin_folders:   ${src.origin_folders.length > 0 ? JSON.stringify(src.origin_folders) : "(all folders)"}`);
-  console.log(`citation_folders: ${clf.citation_folders.length > 0 ? JSON.stringify(clf.citation_folders) : "(none)"}`);
-  console.log(`person_prefix:    ${JSON.stringify(clf.person_prefix)}`);
+  console.log(`Collection:         ${col.name}`);
+  console.log(`Vault path:         ${col.path}`);
+  console.log(`citation_folders:   ${clf.citation_folders.length > 0 ? JSON.stringify(clf.citation_folders) : "(none)"}`);
+  console.log(`person_prefix:      ${JSON.stringify(clf.person_prefix)}`);
   console.log(`annotation_pattern: ${JSON.stringify(src.annotation_pattern)}`);
 }
 
@@ -316,7 +282,6 @@ async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv;
   try {
     switch (cmd) {
-      case "init":        cmdInit(rest); break;
       case "collections": cmdCollections(rest); break;
       case "collection":  cmdCollection(rest); break;
       case "index":       await cmdIndex(rest); break;
@@ -327,7 +292,7 @@ async function main(): Promise<void> {
       default:
         console.error(
           "Usage: qvoid <command> [...args]\n" +
-          "Commands: init, collections, collection, index, embed, query, find-similar, mcp"
+          "Commands: collections, collection, index, embed, query, find-similar, mcp"
         );
         process.exit(1);
     }
