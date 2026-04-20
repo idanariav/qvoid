@@ -69,11 +69,11 @@ export async function buildVectors(
   vectorsPath: string,
   manifestPath: string,
   modelName: string,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
   const pipe = await loadModel(modelName) as (texts: string[], opts: unknown) => Promise<{ data: Float32Array }[]>;
   const texts = links.map(documentText);
 
-  process.stderr.write(`Encoding ${texts.length} documents...\n`);
   const batchSize = 64;
   const allVecs: Float32Array[] = [];
   for (let i = 0; i < texts.length; i += batchSize) {
@@ -82,6 +82,7 @@ export async function buildVectors(
     for (const out of outputs) {
       allVecs.push(new Float32Array(out.data));
     }
+    onProgress?.(Math.min(i + batchSize, texts.length), texts.length);
   }
 
   const dim = allVecs[0]?.length ?? 0;

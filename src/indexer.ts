@@ -169,19 +169,32 @@ function scanFile(
   return results;
 }
 
-function loadScanManifest(p: string): Map<string, number> {
-  if (!fs.existsSync(p)) return new Map();
+interface ScanManifest {
+  origin_folders: string[];
+  files: Map<string, number>;
+}
+
+function loadScanManifest(p: string): ScanManifest {
+  if (!fs.existsSync(p)) return { origin_folders: [], files: new Map() };
   try {
-    const data = JSON.parse(fs.readFileSync(p, "utf-8")) as Record<string, number>;
-    return new Map(Object.entries(data));
+    const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
+    // Support old flat format ({path: mtime}) by checking for a "files" key
+    if ("files" in raw && typeof raw["files"] === "object" && raw["files"] !== null) {
+      return {
+        origin_folders: Array.isArray(raw["origin_folders"]) ? raw["origin_folders"] as string[] : [],
+        files: new Map(Object.entries(raw["files"] as Record<string, number>)),
+      };
+    }
+    // Legacy flat format — treat as no manifest so a full build runs
+    return { origin_folders: [], files: new Map() };
   } catch {
-    return new Map();
+    return { origin_folders: [], files: new Map() };
   }
 }
 
-function saveScanManifest(p: string, fileMtimes: Map<string, number>): void {
+function saveScanManifest(p: string, originFolders: string[], fileMtimes: Map<string, number>): void {
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(Object.fromEntries(fileMtimes)));
+  fs.writeFileSync(p, JSON.stringify({ origin_folders: originFolders, files: Object.fromEntries(fileMtimes) }));
 }
 
 function occurrenceFromRecord(o: Occurrence): Occurrence {
@@ -205,6 +218,7 @@ async function fullBuild(
   excludeExtensions: Set<string>,
   excludeTypes: Set<string>,
   classifier: Classifier,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<LinkRecord[]> {
   let filesToScan = [...fileMtimes.keys()];
   if (originFolders.length > 0) {
@@ -232,8 +246,10 @@ async function fullBuild(
 
   const occurrencesByTarget = new Map<string, Occurrence[]>();
   let i = 0;
+  const total = sourceToTargets.size;
   for (const [source, targets] of sourceToTargets) {
-    if (++i % 500 === 0) process.stderr.write(`  scanning files: ${i}/${sourceToTargets.size}\n`);
+    ++i;
+    onProgress?.(i, total);
     for (const [target, occ] of scanFile(vaultRoot, source, targets, annotationRe)) {
       const list = occurrencesByTarget.get(target) ?? [];
       list.push(occ);
@@ -262,6 +278,7 @@ async function incrementalBuild(
   excludeTypes: Set<string>,
   classifier: Classifier,
   existingJsonl: string,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<LinkRecord[]> {
   const changed: string[] = [];
   const deleted: string[] = [];
@@ -323,7 +340,11 @@ async function incrementalBuild(
       newSourceToTargets.set(src, ts);
     }
   }
+  let scanDone = 0;
+  const scanTotal = newSourceToTargets.size;
   for (const [source, targets] of newSourceToTargets) {
+    ++scanDone;
+    onProgress?.(scanDone, scanTotal);
     for (const [target, occ] of scanFile(vaultRoot, source, targets, annotationRe)) {
       const list = occurrencesByTarget.get(target) ?? [];
       list.push(occ);
@@ -349,6 +370,7 @@ async function incrementalBuild(
 export interface BuildOptions {
   existingJsonl?: string;
   scanManifestPath?: string;
+  onProgress?: (done: number, total: number) => void;
 }
 
 export async function buildIndex(
@@ -366,27 +388,38 @@ export async function buildIndex(
 
   const { fileMtimes, resolvedStems } = await walkVault(vaultRoot);
 
-  const oldManifest = opts.scanManifestPath ? loadScanManifest(opts.scanManifestPath) : new Map<string, number>();
+  const oldManifest = opts.scanManifestPath ? loadScanManifest(opts.scanManifestPath) : { origin_folders: [], files: new Map<string, number>() };
 
-  const incremental = oldManifest.size > 0 && !!opts.existingJsonl && fs.existsSync(opts.existingJsonl);
+  const originFoldersChanged =
+    JSON.stringify([...originFolders].sort()) !== JSON.stringify([...oldManifest.origin_folders].sort());
+
+  if (originFoldersChanged && oldManifest.files.size > 0) {
+    process.stderr.write("  origin_folders changed — running full rebuild.\n");
+  }
+
+  const incremental =
+    !originFoldersChanged &&
+    oldManifest.files.size > 0 &&
+    !!opts.existingJsonl &&
+    fs.existsSync(opts.existingJsonl);
 
   let links: LinkRecord[];
   if (incremental) {
     links = await incrementalBuild(
-      vaultRoot, fileMtimes, resolvedStems, oldManifest,
+      vaultRoot, fileMtimes, resolvedStems, oldManifest.files,
       annotationRe, originFolders, excludeExtensions, excludeTypes,
-      classifier, opts.existingJsonl!,
+      classifier, opts.existingJsonl!, opts.onProgress,
     );
   } else {
     links = await fullBuild(
       vaultRoot, fileMtimes, resolvedStems,
       annotationRe, originFolders, excludeExtensions, excludeTypes,
-      classifier,
+      classifier, opts.onProgress,
     );
   }
 
   if (opts.scanManifestPath) {
-    saveScanManifest(opts.scanManifestPath, fileMtimes);
+    saveScanManifest(opts.scanManifestPath, originFolders, fileMtimes);
   }
   return links;
 }

@@ -15,6 +15,70 @@ import { filterLinks, formatDetailed, formatSummary } from "../query.js";
 import { startMcp } from "../mcp/server.js";
 
 // ---------------------------------------------------------------------------
+// Terminal / progress helpers (same pattern as qimg)
+// ---------------------------------------------------------------------------
+
+const isTTY = process.stderr.isTTY;
+const useColor = isTTY && !process.env["NO_COLOR"];
+const c = {
+  reset:  useColor ? "\x1b[0m"  : "",
+  dim:    useColor ? "\x1b[2m"  : "",
+  bold:   useColor ? "\x1b[1m"  : "",
+  cyan:   useColor ? "\x1b[36m" : "",
+};
+
+const cursor = {
+  hide() { if (isTTY) process.stderr.write("\x1b[?25l"); },
+  show() { if (isTTY) process.stderr.write("\x1b[?25h"); },
+};
+process.on("SIGINT",  () => { cursor.show(); process.exit(130); });
+process.on("SIGTERM", () => { cursor.show(); process.exit(143); });
+
+// OSC 9;4 taskbar progress (WezTerm, Windows Terminal)
+const osc = {
+  set(pct: number)   { if (isTTY) process.stderr.write(`\x1b]9;4;1;${Math.round(pct)}\x07`); },
+  clear()            { if (isTTY) process.stderr.write(`\x1b]9;4;0\x07`); },
+  indeterminate()    { if (isTTY) process.stderr.write(`\x1b]9;4;3\x07`); },
+};
+
+function renderBar(pct: number, width = 30): string {
+  const filled = Math.round((pct / 100) * width);
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+function formatETA(sec: number): string {
+  if (!isFinite(sec) || sec < 0) return "...";
+  if (sec < 60) return `${Math.round(sec)}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
+  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+}
+
+function makeProgressCallback(label: string): (done: number, total: number) => void {
+  const t0 = Date.now();
+  cursor.hide();
+  osc.indeterminate();
+  return (done, total) => {
+    const pct = total > 0 ? (done / total) * 100 : 0;
+    osc.set(pct);
+    if (!isTTY) return;
+    const elapsed = (Date.now() - t0) / 1000;
+    const rate = done / (elapsed || 0.001);
+    const eta = done < total ? formatETA((total - done) / rate) : "done";
+    const bar = renderBar(pct);
+    const pctStr = pct.toFixed(0).padStart(3);
+    process.stderr.write(
+      `\r${c.dim}${label}${c.reset} ${c.cyan}${bar}${c.reset} ${c.bold}${pctStr}%${c.reset} ${c.dim}${done}/${total} ${rate.toFixed(0)}/s ETA ${eta}${c.reset}   `,
+    );
+  };
+}
+
+function finishProgress(): void {
+  osc.clear();
+  cursor.show();
+  if (isTTY) process.stderr.write("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Arg parsing (same hand-rolled style as qnode)
 // ---------------------------------------------------------------------------
 
@@ -146,10 +210,13 @@ async function cmdIndex(argv: string[]): Promise<void> {
   const col = resolveCollection(flagStr(flags["collection"]));
   const classifier = new Classifier(col.config);
   process.stderr.write(`Indexing collection ${JSON.stringify(col.name)} at ${col.path}\n`);
+  const onProgress = makeProgressCallback("scanning");
   const links = await buildIndex(col.path, col.config, classifier, {
     existingJsonl: col.jsonlPath,
     scanManifestPath: col.scanManifestPath,
+    onProgress,
   });
+  finishProgress();
   writeJsonl(links, col.jsonlPath);
   process.stderr.write(`Wrote ${links.length} records → ${col.jsonlPath}\n`);
 }
@@ -164,7 +231,9 @@ async function cmdEmbed(argv: string[]): Promise<void> {
   const links = readJsonl(col.jsonlPath);
   const modelName = col.config.embeddings.model;
   process.stderr.write(`Embedding ${links.length} records with ${modelName}...\n`);
-  await buildVectors(links, col.vectorsPath, col.manifestPath, modelName);
+  const onProgress = makeProgressCallback("encoding");
+  await buildVectors(links, col.vectorsPath, col.manifestPath, modelName, onProgress);
+  finishProgress();
   process.stderr.write(`Wrote vectors → ${col.vectorsPath}\n`);
 }
 
