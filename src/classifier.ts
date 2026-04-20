@@ -7,6 +7,7 @@ const TEMPLATE_SYNTAX_RE = /<%|%>|\{\{|\}\}/;
 const CAMELCASE_RE = /^[A-Z][a-z]+([A-Z][a-z]+)+$/;
 const ET_AL_RE = /\bet\s+al\.?/i;
 const FILE_EXT_RE = /\.\w+$/;
+const VERB_RE = /\b(is|are|was|were|be|does|do|did|improves|boosts|affects|helps|makes|creates)\b/i;
 
 export interface Heuristics {
   date: boolean;
@@ -14,8 +15,12 @@ export interface Heuristics {
   file_extensions: boolean;
   camelcase: boolean;
   template: boolean;
+  // When true: ALL CAPS targets are classified as "unknown" (they're usually acronyms, not ideas)
   capitalization: boolean;
+  // Minimum number of title-case words to classify as "idea" at medium confidence; 0 = disabled
   min_words_for_idea: number;
+  // When true: targets containing a verb are classified as "idea" at high confidence
+  verb_identification: boolean;
 }
 
 function heuristicsFromConfig(cc: CollectionConfig["classifier"]): Heuristics {
@@ -28,6 +33,7 @@ function heuristicsFromConfig(cc: CollectionConfig["classifier"]): Heuristics {
     template: h.template,
     capitalization: h.capitalization,
     min_words_for_idea: h.min_words_for_idea,
+    verb_identification: h.verb_identification,
   };
 }
 
@@ -41,6 +47,7 @@ export function titleFeatures(target: string, personPrefix: string): TitleFeatur
     is_short_camelcase: words.length === 1 && CAMELCASE_RE.test(target),
     has_year_in_parens: YEAR_IN_PARENS_RE.test(target),
     has_template_syntax: TEMPLATE_SYNTAX_RE.test(target),
+    has_verb: VERB_RE.test(target),
   };
 }
 
@@ -51,9 +58,12 @@ function heuristicClass(target: string, feats: TitleFeatures, h: Heuristics): [s
   if (h.file_extensions && (FILE_EXT_RE.test(t) || t.includes("/"))) return ["file", "high"];
   if (h.person && feats.has_person_prefix) return ["person", "high"];
   if (h.date && feats.is_date) return ["date", "high"];
-  if (h.capitalization && (feats.is_all_caps || feats.has_year_in_parens || ET_AL_RE.test(t))) {
-    return ["idea", "high"];
-  }
+  // Academic citation signals → always strong idea indicators
+  if (feats.has_year_in_parens || ET_AL_RE.test(t)) return ["idea", "high"];
+  // Verb in target → claim or statement worth capturing
+  if (h.verb_identification && feats.has_verb) return ["idea", "high"];
+  // ALL CAPS → almost certainly an acronym/abbreviation, not an idea
+  if (h.capitalization && feats.is_all_caps) return ["unknown", "high"];
   if (h.camelcase && feats.is_short_camelcase) return ["file", "medium"];
   if (h.min_words_for_idea > 0 && feats.word_count >= h.min_words_for_idea && t[0] === t[0]?.toUpperCase() && t !== t.toUpperCase()) {
     return ["idea", "medium"];

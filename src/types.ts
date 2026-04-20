@@ -16,6 +16,7 @@ export interface TitleFeatures {
   is_short_camelcase: boolean;
   has_year_in_parens: boolean;
   has_template_syntax: boolean;
+  has_verb: boolean;
 }
 
 export interface UnresolvedLink {

@@ -30,6 +30,7 @@ export const DEFAULT_CONFIG = {
       template: true,
       capitalization: true,
       min_words_for_idea: 4,
+      verb_identification: true,
     },
   },
   embeddings: {
