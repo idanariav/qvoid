@@ -1,0 +1,271 @@
+import * as fs from "fs";
+import * as path from "path";
+import {
+  listCollections,
+  loadCollection,
+  registerCollection,
+  removeCollection,
+  resolveCollection,
+  updateCollectionConfig,
+} from "../config.js";
+import { Classifier } from "../classifier.js";
+import { buildIndex, readJsonl, writeJsonl } from "../indexer.js";
+import { buildVectors, clusterDuplicates, findSimilar } from "../embeddings.js";
+import { filterLinks, formatDetailed, formatSummary } from "../query.js";
+import { startMcp } from "../mcp/server.js";
+
+// ---------------------------------------------------------------------------
+// Arg parsing (same hand-rolled style as qnode)
+// ---------------------------------------------------------------------------
+
+interface ParsedArgs {
+  positional: string[];
+  flags: Record<string, string | boolean>;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const positional: string[] = [];
+  const flags: Record<string, string | boolean> = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const next = argv[i + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        flags[key] = next;
+        i++;
+      } else {
+        flags[key] = true;
+      }
+    } else {
+      positional.push(a);
+    }
+  }
+  return { positional, flags };
+}
+
+function flagStr(v: string | boolean | undefined): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+function flagNum(v: string | boolean | undefined, fallback?: number): number | undefined {
+  if (typeof v !== "string") return fallback;
+  const n = Number(v);
+  return isNaN(n) ? fallback : n;
+}
+
+function flagStrArr(v: string | boolean | undefined): string[] | undefined {
+  if (v === true) return [];
+  if (typeof v === "string") return [v];
+  return undefined;
+}
+
+// --origin-folders accepts multiple values: we collect all remaining positionals
+// that follow the flag. We handle this as a special case in the collection command.
+function collectMultiFlag(argv: string[], flagName: string): string[] | undefined {
+  const flagIdx = argv.indexOf(`--${flagName}`);
+  if (flagIdx === -1) return undefined;
+  const values: string[] = [];
+  for (let i = flagIdx + 1; i < argv.length; i++) {
+    if (argv[i]!.startsWith("--")) break;
+    values.push(argv[i]!);
+  }
+  return values;
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+function cmdInit(argv: string[]): void {
+  const { flags } = parseArgs(argv);
+  const name = flagStr(flags["name"]);
+  const vaultPath = flagStr(flags["path"]);
+  if (!name || !vaultPath) {
+    console.error("Usage: qvoid init --name <name> --path <vault-path>");
+    process.exit(1);
+  }
+  const resolved = path.resolve(vaultPath);
+  registerCollection(name, resolved);
+  console.log(`Registered collection ${JSON.stringify(name)} → ${resolved}`);
+  console.log(`Edit ~/.config/qvoid/collections/${name}.toml to tune settings.`);
+}
+
+function cmdCollections(argv: string[]): void {
+  const { flags } = parseArgs(argv);
+  const removeName = flagStr(flags["remove"]);
+  if (removeName) {
+    if (removeCollection(removeName)) {
+      console.log(`Removed collection ${JSON.stringify(removeName)}`);
+    } else {
+      console.error(`No collection named ${JSON.stringify(removeName)}`);
+      process.exit(1);
+    }
+    return;
+  }
+  const cols = listCollections();
+  if (Object.keys(cols).length === 0) {
+    console.log("No collections registered. Run `qvoid init --name <n> --path <vault>`.");
+    return;
+  }
+  const width = Math.max(...Object.keys(cols).map((n) => n.length));
+  for (const [name, entry] of Object.entries(cols)) {
+    console.log(`  ${name.padEnd(width)}  ${entry.path}`);
+  }
+}
+
+function cmdCollection(argv: string[]): void {
+  const name = argv[0];
+  if (!name) {
+    console.error("Usage: qvoid collection <name> [--origin-folders [folder...]]");
+    process.exit(1);
+  }
+  const col = loadCollection(name);
+  const originFolders = collectMultiFlag(argv.slice(1), "origin-folders");
+  if (originFolders !== undefined) {
+    updateCollectionConfig(name, "source", { origin_folders: originFolders });
+    if (originFolders.length > 0) {
+      console.log(`origin_folders for ${JSON.stringify(name)} set to: ${JSON.stringify(originFolders)}`);
+    } else {
+      console.log(`origin_folders for ${JSON.stringify(name)} cleared (all folders indexed).`);
+    }
+    return;
+  }
+  const src = col.config.source;
+  const clf = col.config.classifier;
+  console.log(`Collection:       ${col.name}`);
+  console.log(`Vault path:       ${col.path}`);
+  console.log(`origin_folders:   ${src.origin_folders.length > 0 ? JSON.stringify(src.origin_folders) : "(all folders)"}`);
+  console.log(`citation_folders: ${clf.citation_folders.length > 0 ? JSON.stringify(clf.citation_folders) : "(none)"}`);
+  console.log(`person_prefix:    ${JSON.stringify(clf.person_prefix)}`);
+  console.log(`annotation_pattern: ${JSON.stringify(src.annotation_pattern)}`);
+}
+
+async function cmdIndex(argv: string[]): Promise<void> {
+  const { flags } = parseArgs(argv);
+  const col = resolveCollection(flagStr(flags["collection"]));
+  const classifier = new Classifier(col.config);
+  process.stderr.write(`Indexing collection ${JSON.stringify(col.name)} at ${col.path}\n`);
+  const links = await buildIndex(col.path, col.config, classifier, {
+    existingJsonl: col.jsonlPath,
+    scanManifestPath: col.scanManifestPath,
+  });
+  writeJsonl(links, col.jsonlPath);
+  process.stderr.write(`Wrote ${links.length} records → ${col.jsonlPath}\n`);
+}
+
+async function cmdEmbed(argv: string[]): Promise<void> {
+  const { flags } = parseArgs(argv);
+  const col = resolveCollection(flagStr(flags["collection"]));
+  if (!fs.existsSync(col.jsonlPath)) {
+    process.stderr.write(`No index found for ${JSON.stringify(col.name)}. Run \`qvoid index\` first.\n`);
+    process.exit(1);
+  }
+  const links = readJsonl(col.jsonlPath);
+  const modelName = col.config.embeddings.model;
+  process.stderr.write(`Embedding ${links.length} records with ${modelName}...\n`);
+  await buildVectors(links, col.vectorsPath, col.manifestPath, modelName);
+  process.stderr.write(`Wrote vectors → ${col.vectorsPath}\n`);
+}
+
+function cmdQuery(argv: string[]): void {
+  const { flags } = parseArgs(argv);
+  const col = resolveCollection(flagStr(flags["collection"]));
+  if (!fs.existsSync(col.jsonlPath)) {
+    process.stderr.write(`No index found for ${JSON.stringify(col.name)}. Run \`qvoid index\` first.\n`);
+    process.exit(1);
+  }
+  const links = readJsonl(col.jsonlPath);
+  const filtered = filterLinks(links, {
+    origin: flagStr(flags["origin"]),
+    destination: flagStr(flags["destination"]),
+    semanticType: flagStr(flags["semantic-type"]),
+    minOccurrences: flagNum(flags["min-occurrences"]),
+    search: flagStr(flags["search"]),
+    limit: flagNum(flags["limit"]),
+  });
+
+  const fmt = flagStr(flags["format"]) ?? "summary";
+
+  if (fmt === "json") {
+    for (const link of filtered) console.log(JSON.stringify(link));
+    return;
+  }
+  if (fmt === "detailed") {
+    console.log(formatDetailed(filtered));
+  } else {
+    console.log(formatSummary(filtered));
+  }
+  process.stderr.write(`\n${filtered.length} of ${links.length} targets match.\n`);
+}
+
+async function cmdFindSimilar(argv: string[]): Promise<void> {
+  const { positional, flags } = parseArgs(argv);
+  const col = resolveCollection(flagStr(flags["collection"]));
+  const cluster = flags["cluster"] === true;
+  const threshold = flagNum(flags["threshold"]) ?? 0.82;
+  const topK = flagNum(flags["top-k"]) ?? 10;
+  const minScore = flagNum(flags["min-score"]) ?? 0.5;
+
+  if (!fs.existsSync(col.vectorsPath) || !fs.existsSync(col.manifestPath)) {
+    process.stderr.write(`No vector index for ${JSON.stringify(col.name)}. Run \`qvoid embed\` first.\n`);
+    process.exit(1);
+  }
+
+  if (cluster) {
+    const groups = clusterDuplicates(col.vectorsPath, col.manifestPath, threshold);
+    groups.sort((a, b) => b.length - a.length);
+    for (const g of groups) {
+      console.log(`\n--- cluster (${g.length} targets)`);
+      for (const t of g) console.log(`  ${t}`);
+    }
+    process.stderr.write(`\n${groups.length} clusters at threshold ${threshold}.\n`);
+    return;
+  }
+
+  const query = positional[0];
+  if (!query) {
+    process.stderr.write("Provide a query string or pass --cluster.\n");
+    process.exit(1);
+  }
+  const results = await findSimilar(query, col.vectorsPath, col.manifestPath, { topK, minScore });
+  if (results.length === 0) {
+    process.stderr.write("No matches above threshold.\n");
+    return;
+  }
+  console.log(`Top ${results.length} similar targets to: ${JSON.stringify(query)}`);
+  for (const { target, score } of results) {
+    console.log(`  ${score.toFixed(3)}  ${target}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  const [, , cmd, ...rest] = process.argv;
+  try {
+    switch (cmd) {
+      case "init":        cmdInit(rest); break;
+      case "collections": cmdCollections(rest); break;
+      case "collection":  cmdCollection(rest); break;
+      case "index":       await cmdIndex(rest); break;
+      case "embed":       await cmdEmbed(rest); break;
+      case "query":       cmdQuery(rest); break;
+      case "find-similar": await cmdFindSimilar(rest); break;
+      case "mcp":         await startMcp(); break;
+      default:
+        console.error(
+          "Usage: qvoid <command> [...args]\n" +
+          "Commands: init, collections, collection, index, embed, query, find-similar, mcp"
+        );
+        process.exit(1);
+    }
+  } catch (e) {
+    process.stderr.write(`error: ${e instanceof Error ? e.message : String(e)}\n`);
+    process.exit(1);
+  }
+}
+
+main();

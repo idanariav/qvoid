@@ -1,0 +1,61 @@
+{
+  "name": "@idan_ariav/qvoid",
+  "version": "0.1.0",
+  "description": "Index, query, and dedup unresolved wikilinks across Obsidian-style vaults — with MCP server for Claude Code.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "qvoid": "bin/qvoid"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "author": "Idan Ariav",
+  "license": "MIT",
+  "keywords": [
+    "obsidian",
+    "wikilinks",
+    "zettelkasten",
+    "markdown",
+    "notes",
+    "pkm",
+    "mcp",
+    "claude"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/idanariav/qvoid.git"
+  },
+  "homepage": "https://github.com/idanariav/qvoid#readme",
+  "bugs": {
+    "url": "https://github.com/idanariav/qvoid/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && printf '#!/usr/bin/env node\\n' | cat - dist/cli/qvoid.js > dist/cli/qvoid.tmp && mv dist/cli/qvoid.tmp dist/cli/qvoid.js && chmod +x dist/cli/qvoid.js",
+    "test": "vitest run --reporter=verbose test/",
+    "qvoid": "tsx src/cli/qvoid.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.4.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "fast-glob": "3.3.3",
+    "smol-toml": "^1.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "3.2.4"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

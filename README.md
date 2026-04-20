@@ -10,14 +10,24 @@ Solves two problems with unresolved links:
 ## Install
 
 ```bash
-git clone <this-repo> ~/GitProjects/qvoid
-cd ~/GitProjects/qvoid
-./install.sh
+npm install -g @idan_ariav/qvoid
 ```
 
-`install.sh` creates a project-local venv, installs dependencies (including `sentence-transformers` — one-time ~200 MB for torch), and drops a launcher at `~/.local/bin/qvoid`. Re-run it any time to upgrade in place.
+Requires Node.js 22+. The embedding model (`all-MiniLM-L6-v2` ONNX, ~25 MB) is downloaded on first use of `qvoid embed` or `qvoid find-similar`.
 
-Make sure `~/.local/bin` is on your `PATH`.
+## MCP server (Claude Code)
+
+Add to your Claude Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "qvoid": { "command": "qvoid", "args": ["mcp"] }
+  }
+}
+```
+
+This exposes four tools: `query`, `find_similar`, `cluster`, `status`.
 
 ## Quickstart
 
@@ -207,5 +217,5 @@ model = "sentence-transformers/all-MiniLM-L6-v2"
 
 ## Requirements
 
-- Python 3.11+
+- Node.js 22+
 - No external tools required — `qvoid index` reads `.md` files directly from disk.
