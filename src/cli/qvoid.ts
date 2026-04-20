@@ -174,12 +174,13 @@ function cmdCollection(argv: string[]): void {
 async function cmdIndex(argv: string[]): Promise<void> {
   const { flags } = parseArgs(argv);
   const col = resolveCollection(flagStr(flags["collection"]));
+  const force = flags["force"] === true;
   const classifier = new Classifier(col.config);
   process.stderr.write(`Indexing collection ${JSON.stringify(col.name)} at ${col.path}\n`);
   const onProgress = makeProgressCallback("scanning");
   const links = await buildIndex(col.path, col.config, classifier, {
-    existingJsonl: col.jsonlPath,
-    scanManifestPath: col.scanManifestPath,
+    existingJsonl: force ? undefined : col.jsonlPath,
+    scanManifestPath: force ? undefined : col.scanManifestPath,
     onProgress,
   });
   finishProgress();
@@ -190,13 +191,20 @@ async function cmdIndex(argv: string[]): Promise<void> {
 async function cmdEmbed(argv: string[]): Promise<void> {
   const { flags } = parseArgs(argv);
   const col = resolveCollection(flagStr(flags["collection"]));
+  const force = flags["force"] === true;
   if (!fs.existsSync(col.jsonlPath)) {
     process.stderr.write(`No index found for ${JSON.stringify(col.name)}. Run \`qvoid index\` first.\n`);
     process.exit(1);
   }
+  if (force) {
+    for (const p of [col.vectorsPath, col.manifestPath]) {
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    }
+  }
   const links = readJsonl(col.jsonlPath);
   const modelName = col.config.embeddings.model;
-  process.stderr.write(`Embedding ${links.length} records with ${modelName} (incremental)...\n`);
+  const mode = force ? "full" : "incremental";
+  process.stderr.write(`Embedding ${links.length} records with ${modelName} (${mode})...\n`);
   const onProgress = makeProgressCallback("encoding");
   await buildVectors(links, col.vectorsPath, col.manifestPath, modelName, onProgress);
   finishProgress();
