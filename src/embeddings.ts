@@ -90,7 +90,8 @@ export async function buildVectors(
     return;
   }
 
-  const pipe = await loadModel(modelName) as (texts: string[], opts: unknown) => Promise<{ data: Float32Array }[]>;
+  type HFTensor = { data: Float32Array; dims: number[] };
+  const pipe = await loadModel(modelName) as (texts: string[], opts: unknown) => Promise<HFTensor>;
   const texts = newLinks.map(documentText);
 
   const batchSize = 64;
@@ -98,8 +99,9 @@ export async function buildVectors(
   for (let i = 0; i < texts.length; i += batchSize) {
     const batch = texts.slice(i, i + batchSize);
     const outputs = await pipe(batch, { pooling: "mean", normalize: true });
-    for (let j = 0; j < outputs.length; j++) {
-      newVecs.set(newLinks[i + j]!.target, new Float32Array(outputs[j]!.data));
+    const hiddenDim = outputs.dims[1] ?? outputs.data.length / batch.length;
+    for (let j = 0; j < batch.length; j++) {
+      newVecs.set(newLinks[i + j]!.target, outputs.data.slice(j * hiddenDim, (j + 1) * hiddenDim));
     }
     onProgress?.(skipped + Math.min(i + batchSize, texts.length), links.length);
   }
@@ -138,9 +140,10 @@ export async function findSimilar(
   if (idx !== -1) {
     qVec = vectors[idx]!;
   } else {
-    const pipe = await loadModel(manifest.model) as (texts: string[], opts: unknown) => Promise<{ data: Float32Array }[]>;
+    type HFTensor = { data: Float32Array; dims: number[] };
+    const pipe = await loadModel(manifest.model) as (texts: string[], opts: unknown) => Promise<HFTensor>;
     const outputs = await pipe([query], { pooling: "mean", normalize: true });
-    qVec = normalizeVec(new Float32Array(outputs[0]!.data));
+    qVec = normalizeVec(outputs.data.slice(0, outputs.dims[1]));
   }
 
   const scored = vectors.map((v, i) => ({ target: manifest.order[i]!, score: dotProduct(v, qVec) }));
