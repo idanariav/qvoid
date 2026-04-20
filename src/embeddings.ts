@@ -71,20 +71,41 @@ export async function buildVectors(
   modelName: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
+  // Load existing vectors if model matches — skip already-embedded targets
+  const existing = new Map<string, Float32Array>();
+  if (fs.existsSync(manifestPath) && fs.existsSync(vectorsPath)) {
+    const { vectors, manifest } = loadVectors(vectorsPath, manifestPath);
+    if (manifest.model === modelName) {
+      for (let i = 0; i < manifest.order.length; i++) {
+        existing.set(manifest.order[i]!, vectors[i]!);
+      }
+    }
+  }
+
+  const newLinks = links.filter((l) => !existing.has(l.target));
+  const skipped = links.length - newLinks.length;
+
+  if (newLinks.length === 0) {
+    onProgress?.(links.length, links.length);
+    return;
+  }
+
   const pipe = await loadModel(modelName) as (texts: string[], opts: unknown) => Promise<{ data: Float32Array }[]>;
-  const texts = links.map(documentText);
+  const texts = newLinks.map(documentText);
 
   const batchSize = 64;
-  const allVecs: Float32Array[] = [];
+  const newVecs = new Map<string, Float32Array>();
   for (let i = 0; i < texts.length; i += batchSize) {
     const batch = texts.slice(i, i + batchSize);
     const outputs = await pipe(batch, { pooling: "mean", normalize: true });
-    for (const out of outputs) {
-      allVecs.push(new Float32Array(out.data));
+    for (let j = 0; j < outputs.length; j++) {
+      newVecs.set(newLinks[i + j]!.target, new Float32Array(outputs[j]!.data));
     }
-    onProgress?.(Math.min(i + batchSize, texts.length), texts.length);
+    onProgress?.(skipped + Math.min(i + batchSize, texts.length), links.length);
   }
 
+  // Merge: preserve order from links (drops removed targets automatically)
+  const allVecs: Float32Array[] = links.map((l) => existing.get(l.target) ?? newVecs.get(l.target)!);
   const dim = allVecs[0]?.length ?? 0;
   const flatBuf = new Float32Array(allVecs.length * dim);
   for (let i = 0; i < allVecs.length; i++) {

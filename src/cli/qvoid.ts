@@ -196,7 +196,7 @@ async function cmdEmbed(argv: string[]): Promise<void> {
   }
   const links = readJsonl(col.jsonlPath);
   const modelName = col.config.embeddings.model;
-  process.stderr.write(`Embedding ${links.length} records with ${modelName}...\n`);
+  process.stderr.write(`Embedding ${links.length} records with ${modelName} (incremental)...\n`);
   const onProgress = makeProgressCallback("encoding");
   await buildVectors(links, col.vectorsPath, col.manifestPath, modelName, onProgress);
   finishProgress();
