@@ -25,11 +25,11 @@ Run qvoid as a Model Context Protocol server to enable Claude Code agents to que
 # Install from npm (if not already installed)
 npm install -g @idan_ariav/qvoid
 
-# Add qvoid to Claude Code via plugin marketplace (one command)
-claude plugin marketplace add idanariav/qvoid
+# Add the pkm-query-tools marketplace (one command)
+claude plugin marketplace add idanariav/pkm-query-tools
 
 # Install the plugin
-claude plugin install qvoid@qvoid
+claude plugin install qvoid@pkm-query-tools
 
 # Verify it's connected
 /mcp list
