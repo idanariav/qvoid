@@ -15,17 +15,46 @@ npm install -g @idan_ariav/qvoid
 
 Requires Node.js 22+. The embedding model (`all-MiniLM-L6-v2` ONNX, ~25 MB) is downloaded on first use of `qvoid embed` or `qvoid find-similar`.
 
-## MCP server (Claude Code)
+## Claude Code MCP Integration
 
-Add to your Claude Code MCP config:
+Run qvoid as a Model Context Protocol server to enable Claude Code agents to query unresolved wikilinks.
+
+### Quick Start
+
+```bash
+# Install from npm (if not already installed)
+npm install -g @idan_ariav/qvoid
+
+# Add qvoid to Claude Code via plugin marketplace (one command)
+claude plugin marketplace add idanariav/qvoid
+
+# Install the plugin
+claude plugin install qvoid@qvoid
+
+# Verify it's connected
+/mcp list
+```
+
+You should see `qvoid` in the list of active MCP servers.
+
+### Manual Setup (if marketplace doesn't work)
+
+If the marketplace approach has issues, configure directly in `~/.claude/settings.json`:
 
 ```json
 {
   "mcpServers": {
-    "qvoid": { "command": "qvoid", "args": ["mcp"] }
+    "qvoid": {
+      "command": "qvoid",
+      "args": ["mcp"]
+    }
   }
 }
 ```
+
+Then verify with `/mcp list`.
+
+### MCP Tools
 
 This exposes four tools: `query`, `find_similar`, `cluster`, `status`.
 
