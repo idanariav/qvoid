@@ -1,4 +1,5 @@
 node_modules/
+models/training_data.json
 .venv/
 __pycache__/
 *.pyc

@@ -13,6 +13,7 @@ import { buildIndex, readJsonl, writeJsonl } from "../indexer.js";
 import { buildVectors, clusterDuplicates, findSimilar } from "../embeddings.js";
 import { filterLinks, formatDetailed, formatSummary } from "../query.js";
 import { startMcp } from "../mcp/server.js";
+import { MlClassifier, MODEL_PATH, TRAINING_DATA_PATH, TRAINING_DIR, loadTrainingData, saveTrainingData } from "../ml-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Terminal / progress helpers (same pattern as qimg)
@@ -283,6 +284,159 @@ async function cmdFindSimilar(argv: string[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// ML classification commands
+// ---------------------------------------------------------------------------
+
+async function cmdClassify(argv: string[]): Promise<void> {
+  const { flags } = parseArgs(argv);
+  const col = resolveCollection(flagStr(flags["collection"]));
+  const dryRun = flags["dry-run"] === true;
+  if (!fs.existsSync(col.jsonlPath)) {
+    process.stderr.write(`No index found for ${JSON.stringify(col.name)}. Run \`qvoid index\` first.\n`);
+    process.exit(1);
+  }
+  const mlc = new MlClassifier();
+  if (!mlc.load()) {
+    process.stderr.write(`No trained model found at ${MODEL_PATH}. Run \`qvoid classifier train <path> <label>\` first.\n`);
+    process.exit(1);
+  }
+  const links = readJsonl(col.jsonlPath);
+  const lowConf = links.filter((l) => l.classification_confidence === "low");
+  if (lowConf.length === 0) {
+    process.stderr.write(`No low-confidence entries to reclassify.\n`);
+    return;
+  }
+
+  if (dryRun) {
+    const targetW = Math.min(50, Math.max(6, ...lowConf.map((l) => l.target.length)));
+    const categoryW = 8;
+    const header = `${"target".padEnd(targetW)}  ${"current".padEnd(categoryW)}  predicted`;
+    const sep = "-".repeat(header.length);
+    console.log(header);
+    console.log(sep);
+    let changed = 0;
+    for (const link of lowConf) {
+      const prediction = mlc.predict(link.target) ?? "—";
+      const marker = prediction !== link.expected_destination && prediction !== "unknown" ? " *" : "";
+      if (marker) changed++;
+      console.log(`${link.target.padEnd(targetW)}  ${link.expected_destination.padEnd(categoryW)}  ${prediction}${marker}`);
+    }
+    process.stderr.write(`\n${lowConf.length} low-confidence entries — ${changed} would change (* = change). Dry run, nothing written.\n`);
+    return;
+  }
+
+  let updated = 0;
+  for (const link of links) {
+    if (link.classification_confidence !== "low") continue;
+    const prediction = mlc.predict(link.target);
+    if (prediction !== null && prediction !== "unknown") {
+      link.expected_destination = prediction;
+      link.classification_confidence = "medium";
+      updated++;
+    }
+  }
+  writeJsonl(links, col.jsonlPath);
+  process.stderr.write(`Reclassified ${updated}/${lowConf.length} low-confidence entries → ${col.jsonlPath}\n`);
+}
+
+async function cmdClassifierTrain(argv: string[]): Promise<void> {
+  const { positional, flags } = parseArgs(argv);
+  const subCmd = positional[0];
+
+  if (subCmd === "retrain") {
+    const outputPath = flagStr(flags["output"]) ?? MODEL_PATH;
+    if (!fs.existsSync(TRAINING_DIR)) {
+      process.stderr.write(`No training directory found at ${TRAINING_DIR}\n`);
+      process.exit(1);
+    }
+    const txtFiles = fs.readdirSync(TRAINING_DIR).filter((f) => f.endsWith(".txt"));
+    if (txtFiles.length === 0) {
+      process.stderr.write(`No .txt files found in ${TRAINING_DIR}\n`);
+      process.exit(1);
+    }
+    const mlc = new MlClassifier();
+    const allExamples: Array<{ text: string; label: string }> = [];
+    for (const file of txtFiles) {
+      const label = path.basename(file, ".txt");
+      const lines = fs.readFileSync(path.join(TRAINING_DIR, file), "utf-8")
+        .split("\n").map((l) => l.trim()).filter(Boolean);
+      for (const line of lines) mlc.learn(line, label);
+      allExamples.push(...lines.map((text) => ({ text, label })));
+      process.stderr.write(`Loaded ${lines.length} examples for label "${label}"\n`);
+    }
+    const labels = new Set(allExamples.map((e) => e.label));
+    if (labels.size < 2) {
+      process.stderr.write(`Need at least 2 label files in ${TRAINING_DIR}\n`);
+      process.exit(1);
+    }
+    saveTrainingData(allExamples);
+    const json = mlc.finalize();
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, json);
+    process.stderr.write(`Model saved → ${outputPath} (labels: ${[...labels].join(", ")})\n`);
+    return;
+  }
+
+  if (subCmd !== "train") {
+    process.stderr.write(
+      "Usage:\n" +
+      "  qvoid classifier train <path> <label> [--append] [--output <path>]\n" +
+      "  qvoid classifier retrain [--output <path>]\n"
+    );
+    process.exit(1);
+  }
+  const trainingPath = positional[1];
+  const label = positional[2];
+  if (!trainingPath || !label) {
+    process.stderr.write("Usage: qvoid classifier train <path> <label> [--append] [--output <path>]\n");
+    process.exit(1);
+  }
+  const append = flags["append"] === true;
+  const outputPath = flagStr(flags["output"]) ?? MODEL_PATH;
+
+  // Load accumulated training data from previous runs
+  const existingExamples = append ? loadTrainingData() : [];
+  if (append && existingExamples.length > 0) {
+    process.stderr.write(`Loaded ${existingExamples.length} existing training examples from ${TRAINING_DATA_PATH}\n`);
+  }
+
+  const files = fs.readdirSync(trainingPath)
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => path.basename(f, ".md"));
+  if (files.length === 0) {
+    process.stderr.write(`No .md files found in ${trainingPath}\n`);
+    process.exit(1);
+  }
+
+  const newExamples = files.map((stem) => ({ text: stem, label }));
+  const allExamples = [...existingExamples, ...newExamples];
+
+  // Always persist accumulated training data so --append works on the next run
+  saveTrainingData(allExamples);
+  process.stderr.write(`Learned ${newExamples.length} examples for label "${label}" (${allExamples.length} total)\n`);
+
+  const labels = new Set(allExamples.map((e) => e.label));
+  if (labels.size < 2) {
+    process.stderr.write(
+      `Training data saved to ${TRAINING_DATA_PATH}\n` +
+      `Need at least 2 labels to finalize the model — currently have: ${[...labels].join(", ")}\n` +
+      `Run again with --append to add more labels.\n`
+    );
+    return;
+  }
+
+  // Rebuild classifier from all accumulated examples and consolidate
+  const mlc = new MlClassifier();
+  for (const { text, label: lbl } of allExamples) {
+    mlc.learn(text, lbl);
+  }
+  const json = mlc.finalize();
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, json);
+  process.stderr.write(`Model saved → ${outputPath} (labels: ${[...labels].join(", ")})\n`);
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -296,11 +450,13 @@ async function main(): Promise<void> {
       case "embed":       await cmdEmbed(rest); break;
       case "query":       cmdQuery(rest); break;
       case "find-similar": await cmdFindSimilar(rest); break;
+      case "classify":    await cmdClassify(rest); break;
+      case "classifier":  await cmdClassifierTrain(rest); break;
       case "mcp":         await startMcp(); break;
       default:
         console.error(
           "Usage: qvoid <command> [...args]\n" +
-          "Commands: collections, collection, index, embed, query, find-similar, mcp"
+          "Commands: collections, collection, index, embed, query, find-similar, classify, classifier [train|retrain], mcp"
         );
         process.exit(1);
     }
