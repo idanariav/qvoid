@@ -1,115 +1,106 @@
 # qvoid
 
-Index, query, and dedup unresolved wikilinks across Obsidian-style vaults.
+Index, query, and deduplicate unresolved wikilinks across Obsidian-style vaults — with an MCP server for Claude Code.
 
-Solves two problems with unresolved links:
+---
 
-- **Noise** — every uncreated wikilink looks the same. `qvoid` classifies each target as `idea`, `person`, `date`, `file`, `template`, or `unknown`, and lets you filter by type, origin folder, and annotation.
-- **Inaccuracy** — each occurrence is enriched with the surrounding sentence and any inline semantic annotation (`Supports::`, `Related::`, `Jump::`, …). An embedding layer surfaces near-duplicate targets so you don't create two notes for the same idea.
+## Quick Start
 
-## Install
+### Install
+
+**Via npm:**
 
 ```bash
 npm install -g @idan_ariav/qvoid
 ```
 
-Requires Node.js 22+. The embedding model (`all-MiniLM-L6-v2` ONNX, ~25 MB) is downloaded on first use of `qvoid embed` or `qvoid find-similar`.
-
-## Claude Code MCP Integration
-
-Run qvoid as a Model Context Protocol server to enable Claude Code agents to query unresolved wikilinks.
-
-### Quick Start
+**Via Claude Marketplace:**
 
 ```bash
-# Install from npm (if not already installed)
-npm install -g @idan_ariav/qvoid
-
-# Add the pkm-query-tools marketplace (one command)
 claude plugin marketplace add idanariav/pkm-query-tools
-
-# Install the plugin
 claude plugin install qvoid@pkm-query-tools
-
-# Verify it's connected
-/mcp list
 ```
 
-You should see `qvoid` in the list of active MCP servers.
+Then verify the MCP server is running with `/mcp list` — you should see `qvoid` in the list.
 
-### Manual Setup (if marketplace doesn't work)
-
-If the marketplace approach has issues, configure directly in `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "qvoid": {
-      "command": "qvoid",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Then verify with `/mcp list`.
-
-### MCP Tools
-
-This exposes four tools: `query`, `find_similar`, `cluster`, `status`.
-
-## Quickstart
+### First Run
 
 ```bash
-# 1. Register your vault
+# Register your vault
 qvoid collection vault --path ~/my-vault
 
-# 2. Build the index
+# Build the link index
 qvoid index
 
-# 4. Query
-qvoid query --destination idea
-qvoid query --destination idea --min-occurrences 2 --format detailed
+# Ask Claude to help you manage your vault
+```
 
-# 5. Find near-duplicates
+### Popular Commands
+
+```bash
+# See all unresolved idea-type links
+qvoid query --destination idea
+
+# Find near-duplicate link targets (requires embed step)
 qvoid embed
 qvoid find-similar --cluster
+
+# Detailed view with surrounding context
+qvoid query --destination idea --min-occurrences 2 --format detailed
+
+# Search by keyword across target names and contexts
+qvoid query --search "cognitive bias"
 ```
+
+---
+
+## Use Cases
+
+qvoid helps you manage the hidden layer of your knowledge base — the links that point to notes that don't exist yet. These unresolved wikilinks accumulate over time and are hard to reason about manually.
+
+**Questions qvoid can help you answer:**
+
+- *What ideas have I referenced the most but never written a note for?* — Use `query --destination idea --min-occurrences 3` to surface high-frequency unresolved concepts.
+- *Are there duplicate ideas in my vault under different names?* — Use `find-similar --cluster` to detect near-duplicate link targets before creating notes.
+- *Which people have I referenced across my notes?* — Use `query --destination person` to see all person-type wikilinks.
+- *What topics from my reading notes are still unexplored?* — Use `query --origin Sources/Articles --destination idea` to filter by source folder and type.
+- *Which unresolved links are supported by strong semantic context?* — Use `query --semantic-type Supports` to find links annotated with inline claim annotations.
+- *What's the overall state of my unresolved links?* — Ask Claude directly via the MCP server: *"Summarize my unresolved links and suggest which ones to write first."*
+
+---
 
 ## Commands
 
+### `collection`
+
+Register a vault as a named collection, or inspect its current settings:
+
+```bash
+qvoid collection vault --path ~/my-vault   # register (saves to ~/.config/qvoid/collections/vault.toml)
+qvoid collection vault                     # show current settings
+```
+
 ### `collections`
 
-List or remove registered collections:
+List all registered collections, or remove one:
 
 ```bash
 qvoid collections
 qvoid collections --remove vault
 ```
 
-### `collection`
-
-Register a vault as a named collection, or view its current settings:
-
-```bash
-qvoid collection vault --path ~/my-vault   # register (creates ~/.config/qvoid/collections/vault.toml)
-qvoid collection vault                     # show current settings
-```
-
 ### `index`
 
-Build or refresh the link index:
+Build or refresh the link index. Reads `.md` files directly — no external tools required. Subsequent runs are **incremental**: only files modified since the last run are rescanned. Links whose target file has since been created are automatically dropped.
 
 ```bash
 qvoid index
-qvoid index --collection vault   # explicit collection name
+qvoid index --collection vault   # target a specific collection
 ```
-
-Reads `.md` files directly — no external tools required. Subsequent runs are **incremental**: only files whose modification time changed since the last run are rescanned. Links whose target `.md` file has since been created are automatically dropped.
 
 ### `embed`
 
-Build embeddings from the current index (required for `find-similar`):
+Build vector embeddings from the current index. Required before running `find-similar`. Downloads the embedding model (~25 MB) on first use.
 
 ```bash
 qvoid embed
@@ -117,114 +108,127 @@ qvoid embed
 
 ### `query`
 
-Filter the index by type, origin folder, annotation, or free-text search:
+Filter and search the index by type, folder, annotation, or free text:
 
 ```bash
+# Filter by link type
 qvoid query --destination idea
+qvoid query --destination person
+
+# Filter by source folder
 qvoid query --destination idea --origin Sources/Articles
-qvoid query --destination idea --min-occurrences 3 --format detailed
-qvoid query --semantic-type Supports --format detailed
+
+# Require a minimum number of occurrences
+qvoid query --destination idea --min-occurrences 3
+
+# Filter by inline semantic annotation
+qvoid query --semantic-type Supports
+
+# Keyword search across target names and surrounding context
 qvoid query --search "cognitive bias" --limit 20
+
+# Output as JSON for scripting
 qvoid query --format json | jq '.target'
+
+# Detailed view with surrounding sentences
+qvoid query --destination idea --format detailed
 ```
 
 | Flag | Description |
 |---|---|
 | `--destination` | Filter by type: `idea`, `person`, `date`, `file`, `template`, `unknown` |
-| `--origin` | Source path prefix (e.g. `Sources/Articles`) |
-| `--semantic-type` | Match a specific inline annotation (e.g. `Supports`) |
-| `--min-occurrences` | Minimum number of occurrences across the vault |
+| `--origin` | Source folder prefix (e.g. `Sources/Articles`) |
+| `--semantic-type` | Match a specific inline annotation (e.g. `Supports`, `Opposes`) |
+| `--min-occurrences` | Minimum number of times the target appears across the vault |
 | `--search` | Substring match on target name or surrounding context |
-| `--limit` | Cap result count |
+| `--limit` | Cap the number of results |
 | `--format` | `summary` (default), `detailed`, or `json` |
 
 ### `find-similar`
 
-Find semantically similar unresolved targets using embeddings:
+Find semantically similar unresolved link targets using vector embeddings. Useful for detecting duplicates before creating new notes.
 
 ```bash
+# Find links similar to a query phrase
 qvoid find-similar "seeing reality clearly" --top-k 5
-qvoid find-similar --cluster                     # group suspected duplicates
-qvoid find-similar --cluster --threshold 0.85    # stricter clustering
+
+# Group suspected duplicates into clusters
+qvoid find-similar --cluster
+
+# Use a stricter similarity threshold
+qvoid find-similar --cluster --threshold 0.85
 ```
 
-Run `qvoid embed` first.
+Run `qvoid embed` before using this command.
 
-## Types
+---
 
-| Type | Meaning | Primary signals |
-|---|---|---|
-| `idea` | A concept, claim, or source worth capturing as a note | word count, capitalization, annotation context |
-| `person` | A person link | configurable prefix (default `@`) |
-| `date` | A date reference | ISO date, week, quarter patterns |
-| `file` | A resource link, not a note | file extension, `/` in target, CamelCase |
-| `template` | A template artifact | `<% %>`, `{{ }}` syntax |
-| `unknown` | Could not classify | fallback |
+## Methodology
 
-## Classifier
+qvoid processes your vault in three stages:
 
-Two passes:
+### 1. Indexing
 
-1. **Title heuristics** — structural signals (person prefix, ISO date, file extension, template syntax) are high-confidence and always respected. Capitalization patterns (ALL-CAPS, year in parens, et al.) signal a high-confidence idea. Word count provides a medium/low-confidence idea baseline. Each heuristic can be toggled via `[classifier.heuristics]`.
-2. **Context boost** — inline annotations (`Supports::` etc., pattern configurable) score each occurrence. Score ≥ 3 → high-confidence idea; score ≥ 1 → medium. High-confidence title matches are never overridden.
+The indexer scans every `.md` file in the registered vault, extracts all `[[wikilinks]]`, and checks which ones do not resolve to an existing file. For each unresolved target, it records:
 
-## Data layout
+- The target name
+- The file it appeared in (origin)
+- The surrounding sentence for context
+- Any inline semantic annotation (e.g. `Supports::`, `Related::`) captured by a configurable regex pattern
 
-All data lives outside the vault:
+Runs are incremental — a scan manifest tracks file modification times so only changed files are reprocessed.
 
-- Config: `~/.config/qvoid/collections/<name>.toml`
-- Index: `~/.local/share/qvoid/<name>/unresolved_links.jsonl`
-- Scan manifest: `~/.local/share/qvoid/<name>/scan_manifest.json`
-- Vectors: `~/.local/share/qvoid/<name>/vectors.npy` + `manifest.json`
+### 2. Classification
 
-## Collection config
+Each unresolved link target is classified into one of six types using a two-pass heuristic system:
 
-Every field is optional; omitted keys fall back to the defaults shown below.
+**Pass 1 — Title heuristics:** Structural signals are evaluated first: person prefixes (`@`), ISO date patterns, file extensions, CamelCase, and template syntax. These are high-confidence and are never overridden. Word count and capitalization patterns (ALL-CAPS, year in parentheses, title-case phrases) provide medium-confidence idea signals.
 
-```toml
-[source]
-# Regex with one capture group matching the annotation name before a wikilink.
-# Default: Dataview inline-field syntax — (Key:: [[target]]
-# Set to "" to disable annotation extraction.
-annotation_pattern = '\(([A-Za-z]+)::\s*$'
+**Pass 2 — Context boost:** Inline annotations from each occurrence contribute a confidence score. Annotations like `Supports` and `Opposes` add a strong claim signal (+3); annotations like `Related` and `Jump` add a weaker concept signal (+1). If the accumulated score reaches the idea threshold, the type is upgraded accordingly.
 
-# Targets with these extensions are excluded before indexing.
-# Remove entries to allow them through; add entries to block more.
-exclude_extensions = [
-    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
-    ".excalidraw", ".pdf", ".mp4", ".mov", ".mp3", ".wav", ".zip",
-]
+| Type | Meaning |
+|---|---|
+| `idea` | A concept, claim, or source worth capturing as a note |
+| `person` | A person reference (matched by configurable prefix, default `@`) |
+| `date` | A date reference (ISO date, week, or quarter patterns) |
+| `file` | A resource link, not a note (file extension, `/` in path, CamelCase) |
+| `template` | A template artifact (`<% %>`, `{{ }}` syntax) |
+| `unknown` | Could not be classified — fallback |
 
-[classifier]
-# Drop links classified as these types from the index entirely.
-# Valid values: idea, person, date, file, template, unknown
-exclude_types = []
+### 3. Embedding and Similarity
 
-# Folders whose unannotated occurrences add +1 to the idea confidence score.
-citation_folders = []
+When you run `qvoid embed`, each unique unresolved target is encoded into a dense vector using the `all-MiniLM-L6-v2` ONNX model (~25 MB, downloaded once). These vectors are stored locally alongside the index.
 
-# Inline annotations and their confidence boost.
-claim_annotations = ["Supports", "Opposes", "Weakens", "Reminds"]  # +3
-claim_or_concept_annotations = ["Jump", "Related", "Aka"]           # +1
+`find-similar` uses cosine similarity to surface targets that are semantically close — either to a query phrase or to each other (clustering mode). This lets you catch duplicates like `"mental models"` and `"thinking frameworks"` before creating redundant notes.
 
-# Prefix that marks a person link (e.g. "@Alice"). Set to "" to disable.
-person_prefix = "@"
+---
 
-[classifier.heuristics]
-# Toggle individual detection rules. Partial overrides are merged with defaults.
-date = true             # ISO date/week/quarter patterns → date
-person = true           # person_prefix links → person
-file_extensions = true  # targets with a file extension or "/" → file
-camelcase = true        # CamelCase single words → file (medium confidence)
-template = true         # template syntax → template
-capitalization = true   # ALL-CAPS, (YEAR), et al. → high-confidence idea
-min_words_for_idea = 4  # ≥ N title-case words → medium-confidence idea; 0 = disabled
+## Privacy and Security
 
-[embeddings]
-model = "sentence-transformers/all-MiniLM-L6-v2"
+qvoid runs entirely on your device. No data ever leaves your machine.
+
+- **No cloud indexing** — the vault scanner reads files directly from disk.
+- **No remote API calls** — the embedding model (`all-MiniLM-L6-v2`) runs locally via ONNX Runtime.
+- **No telemetry** — nothing is phoned home.
+- **Data stays local** — the index, vectors, and config are all written to standard local directories (`~/.config/qvoid/`, `~/.local/share/qvoid/`), never synced externally.
+
+You can point qvoid at any vault, including private journals or sensitive work notes, without concern.
+
+---
+
+## Other Plugins
+
+qvoid is part of the **pkm-query-tools** marketplace — a suite of local, offline MCP plugins for knowledge management:
+
+| Plugin | Description |
+|---|---|
+| **qnode** | Graph traversal over your vault's link structure. Explore neighbors, paths, and clusters of connected notes. |
+| **qimg** | Search and retrieve images from your vault using semantic similarity. |
+
+Install the full suite:
+
+```bash
+claude plugin marketplace add idanariav/pkm-query-tools
+claude plugin install qnode@pkm-query-tools
+claude plugin install qimg@pkm-query-tools
 ```
-
-## Requirements
-
-- Node.js 22+
-- No external tools required — `qvoid index` reads `.md` files directly from disk.
