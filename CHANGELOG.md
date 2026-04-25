@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-25
+
+### Added
+- **ML classifier step** — Low-confidence index entries now pass through a Naive Bayes text classifier for improved type accuracy
+- **Short capitalized links as `person`** — Single capitalized words are now recognized as likely person references
+- **Force flag for `index` and `embed`** — `--force` option re-processes all entries, bypassing incremental caching
+- **Progress bar** — `index` and `embed` commands now display a progress bar during processing
+- **Verb classification** — Verb-form link targets are now classified and handled appropriately
+- **Marketplace config** — Added Claude Code MCP integration metadata and marketplace entry
+
+### Changed
+- **`collection` command consolidates `init`** — The `init` subcommand is now merged into `collection`; use `qvoid collection <name>` to create or manage collections
+- **Smarter incremental embedding** — Embedding now only processes new or modified links, reducing re-run cost
+
+### Fixed
+- Embedding pipeline error when processing certain link shapes
+
 ## [0.1.0] - 2026-04-19
 
 Initial release.
