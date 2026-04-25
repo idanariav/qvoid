@@ -42,7 +42,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && printf '#!/usr/bin/env node\\n' | cat - dist/cli/qvoid.js > dist/cli/qvoid.tmp && mv dist/cli/qvoid.tmp dist/cli/qvoid.js && chmod +x dist/cli/qvoid.js",
-    "test": "vitest run --reporter=verbose test/",
+    "test": "vitest run --reporter=verbose --passWithNoTests test/",
     "qvoid": "tsx src/cli/qvoid.ts"
   },
   "dependencies": {
