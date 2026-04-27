@@ -4,65 +4,16 @@ import fg from "fast-glob";
 import type { CollectionConfig } from "./config.js";
 import { Classifier } from "./classifier.js";
 import { type LinkRecord, type Occurrence, linkToRecord } from "./types.js";
-
-const WIKILINK_RE = /\[\[([^\[\]]+?)\]\]/g;
-const CONTEXT_CHAR_WINDOW = 200;
-const SENTENCE_BOUNDARY_RE = /(?<=[.!?])\s+/;
+import { parseMarkdownAST, extractWikiLinks, extractContext } from "./parser.js";
 
 function normalize(target: string): string {
   return target.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function parseWikilink(raw: string): [string, string | undefined] {
-  let target = raw;
-  let alias: string | undefined;
-  if (target.includes("|")) {
-    const idx = target.indexOf("|");
-    alias = target.slice(idx + 1).trim();
-    target = target.slice(0, idx);
-  }
-  for (const sep of ["#", "^"]) {
-    const idx = target.indexOf(sep);
-    if (idx !== -1) target = target.slice(0, idx);
-  }
-  return [target.trim(), alias];
-}
-
-function extractContext(line: string, start: number, end: number): [string, string] {
-  const beforeRaw = line.slice(0, start).trimEnd();
-  const afterRaw = line.slice(end).trimStart();
-
-  let before = beforeRaw.slice(-CONTEXT_CHAR_WINDOW);
-  const sentencesBefore = before.split(SENTENCE_BOUNDARY_RE);
-  if (sentencesBefore.length > 1) before = sentencesBefore[sentencesBefore.length - 1]!;
-
-  let after = afterRaw.slice(0, CONTEXT_CHAR_WINDOW);
-  const sentencesAfter = after.split(SENTENCE_BOUNDARY_RE);
-  if (sentencesAfter.length > 1) after = sentencesAfter[0]!;
-
-  return [before.trim(), after.trim()];
-}
-
-function extractSemanticType(line: string, start: number, annotationRe: RegExp | null): string | undefined {
-  if (!annotationRe) return undefined;
-  const segment = line.slice(Math.max(0, start - 40), start);
-  const m = annotationRe.exec(segment);
-  return m?.[1];
 }
 
 function sourceFolder(sourcePath: string): string {
   const parts = sourcePath.split("/");
   if (parts.length >= 2) return parts.slice(0, 2).join("/");
   return parts[0] ?? sourcePath;
-}
-
-function compileAnnotationPattern(raw: string): RegExp | null {
-  if (!raw) return null;
-  try {
-    return new RegExp(raw);
-  } catch (e) {
-    throw new Error(`Invalid annotation_pattern ${JSON.stringify(raw)}: ${e}`);
-  }
 }
 
 interface VaultInfo {
@@ -101,70 +52,64 @@ function isResolved(target: string, resolvedStems: Set<string>, vaultRoot: strin
   return fs.existsSync(candidate);
 }
 
+function readFile(vaultRoot: string, relPath: string): string | null {
+  try {
+    return fs.readFileSync(path.join(vaultRoot, relPath), "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the unresolved wikilink targets found in a single file using the AST
+ * parser. No regex scanning.
+ */
 function extractUnresolvedFromFile(
   vaultRoot: string,
   relPath: string,
   resolvedStems: Set<string>,
   excludeExtensions: Set<string>,
 ): string[] {
-  const abs = path.join(vaultRoot, relPath);
-  let text: string;
-  try {
-    text = fs.readFileSync(abs, "utf-8");
-  } catch {
-    return [];
-  }
+  const text = readFile(vaultRoot, relPath);
+  if (text === null) return [];
 
-  const targets: string[] = [];
-  let m: RegExpExecArray | null;
-  WIKILINK_RE.lastIndex = 0;
-  while ((m = WIKILINK_RE.exec(text)) !== null) {
-    const [target] = parseWikilink(m[1]!);
+  const tree = parseMarkdownAST(text);
+  const seen = new Set<string>();
+  for (const { target } of extractWikiLinks(tree)) {
     if (!target) continue;
     const ext = path.extname(target).toLowerCase();
     if (excludeExtensions.has(ext)) continue;
-    if (!isResolved(target, resolvedStems, vaultRoot)) {
-      targets.push(target);
-    }
+    if (!isResolved(target, resolvedStems, vaultRoot)) seen.add(target);
   }
-  return targets;
+  return [...seen];
 }
 
+/**
+ * Scans a single file and emits (target, Occurrence) pairs for every wikilink
+ * whose target is in `expectedTargets`. Context and semantic type come from the
+ * AST rather than ad-hoc regexes.
+ */
 function scanFile(
   vaultRoot: string,
   relPath: string,
   expectedTargets: Set<string>,
-  annotationRe: RegExp | null,
+  text: string,
 ): [string, Occurrence][] {
-  const abs = path.join(vaultRoot, relPath);
-  let text: string;
-  try {
-    text = fs.readFileSync(abs, "utf-8");
-  } catch {
-    return [];
-  }
-
+  const tree = parseMarkdownAST(text);
   const results: [string, Occurrence][] = [];
-  const lines = text.split("\n");
-  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-    const line = lines[lineIdx]!;
-    WIKILINK_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = WIKILINK_RE.exec(line)) !== null) {
-      const [target, alias] = parseWikilink(m[1]!);
-      if (!expectedTargets.has(target)) continue;
-      const [ctxBefore, ctxAfter] = extractContext(line, m.index, m.index + m[0].length);
-      const sem = extractSemanticType(line, m.index, annotationRe);
-      results.push([target, {
-        source: relPath,
-        source_folder: sourceFolder(relPath),
-        line: lineIdx + 1,
-        alias,
-        semantic_type: sem,
-        context_before: ctxBefore,
-        context_after: ctxAfter,
-      }]);
-    }
+
+  for (const link of extractWikiLinks(tree)) {
+    if (!expectedTargets.has(link.target)) continue;
+    const [ctxBefore, ctxAfter] = extractContext(text, link.startOffset, link.endOffset);
+    results.push([link.target, {
+      source: relPath,
+      source_folder: sourceFolder(relPath),
+      line: link.line,
+      alias: link.alias,
+      semantic_type: link.semanticType,
+      context_before: ctxBefore,
+      context_after: ctxAfter,
+    }]);
   }
   return results;
 }
@@ -178,14 +123,12 @@ function loadScanManifest(p: string): ScanManifest {
   if (!fs.existsSync(p)) return { origin_folders: [], files: new Map() };
   try {
     const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
-    // Support old flat format ({path: mtime}) by checking for a "files" key
     if ("files" in raw && typeof raw["files"] === "object" && raw["files"] !== null) {
       return {
         origin_folders: Array.isArray(raw["origin_folders"]) ? raw["origin_folders"] as string[] : [],
         files: new Map(Object.entries(raw["files"] as Record<string, number>)),
       };
     }
-    // Legacy flat format — treat as no manifest so a full build runs
     return { origin_folders: [], files: new Map() };
   } catch {
     return { origin_folders: [], files: new Map() };
@@ -213,7 +156,6 @@ async function fullBuild(
   vaultRoot: string,
   fileMtimes: Map<string, number>,
   resolvedStems: Set<string>,
-  annotationRe: RegExp | null,
   originFolders: string[],
   excludeExtensions: Set<string>,
   excludeTypes: Set<string>,
@@ -250,7 +192,9 @@ async function fullBuild(
   for (const [source, targets] of sourceToTargets) {
     ++i;
     onProgress?.(i, total);
-    for (const [target, occ] of scanFile(vaultRoot, source, targets, annotationRe)) {
+    const text = readFile(vaultRoot, source);
+    if (text === null) continue;
+    for (const [target, occ] of scanFile(vaultRoot, source, targets, text)) {
       const list = occurrencesByTarget.get(target) ?? [];
       list.push(occ);
       occurrencesByTarget.set(target, list);
@@ -272,7 +216,6 @@ async function incrementalBuild(
   currentFiles: Map<string, number>,
   resolvedStems: Set<string>,
   oldManifest: Map<string, number>,
-  annotationRe: RegExp | null,
   originFolders: string[],
   excludeExtensions: Set<string>,
   excludeTypes: Set<string>,
@@ -345,7 +288,9 @@ async function incrementalBuild(
   for (const [source, targets] of newSourceToTargets) {
     ++scanDone;
     onProgress?.(scanDone, scanTotal);
-    for (const [target, occ] of scanFile(vaultRoot, source, targets, annotationRe)) {
+    const text = readFile(vaultRoot, source);
+    if (text === null) continue;
+    for (const [target, occ] of scanFile(vaultRoot, source, targets, text)) {
       const list = occurrencesByTarget.get(target) ?? [];
       list.push(occ);
       occurrencesByTarget.set(target, list);
@@ -381,7 +326,6 @@ export async function buildIndex(
 ): Promise<LinkRecord[]> {
   const sourceCfg = config.source;
   const classifierCfg = config.classifier;
-  const annotationRe = compileAnnotationPattern(sourceCfg.annotation_pattern);
   const originFolders = [...sourceCfg.origin_folders];
   const excludeExtensions = new Set(sourceCfg.exclude_extensions.map((e) => e.toLowerCase()));
   const excludeTypes = new Set(classifierCfg.exclude_types);
@@ -407,13 +351,13 @@ export async function buildIndex(
   if (incremental) {
     links = await incrementalBuild(
       vaultRoot, fileMtimes, resolvedStems, oldManifest.files,
-      annotationRe, originFolders, excludeExtensions, excludeTypes,
+      originFolders, excludeExtensions, excludeTypes,
       classifier, opts.existingJsonl!, opts.onProgress,
     );
   } else {
     links = await fullBuild(
       vaultRoot, fileMtimes, resolvedStems,
-      annotationRe, originFolders, excludeExtensions, excludeTypes,
+      originFolders, excludeExtensions, excludeTypes,
       classifier, opts.onProgress,
     );
   }

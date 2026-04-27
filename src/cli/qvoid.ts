@@ -169,7 +169,6 @@ function cmdCollection(argv: string[]): void {
   console.log(`Vault path:         ${col.path}`);
   console.log(`citation_folders:   ${clf.citation_folders.length > 0 ? JSON.stringify(clf.citation_folders) : "(none)"}`);
   console.log(`person_prefix:      ${JSON.stringify(clf.person_prefix)}`);
-  console.log(`annotation_pattern: ${JSON.stringify(src.annotation_pattern)}`);
 }
 
 async function cmdIndex(argv: string[]): Promise<void> {

@@ -10,7 +10,6 @@ import {
 export const DEFAULT_CONFIG = {
   source: {
     origin_folders: [] as string[],
-    annotation_pattern: String.raw`\(([A-Za-z]+)::\s*$`,
     exclude_extensions: [
       ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
       ".excalidraw", ".pdf", ".mp4", ".mov", ".mp3", ".wav", ".zip",
