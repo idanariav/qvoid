@@ -184,11 +184,11 @@ Each unresolved link target is classified into one of six types using a two-pass
 
 **Pass 1 — Title heuristics:** Structural signals are evaluated first: person prefixes (`@`), ISO date patterns, file extensions, CamelCase, and template syntax. These are high-confidence and are never overridden. Word count and capitalization patterns (ALL-CAPS, year in parentheses, title-case phrases) provide medium-confidence idea signals.
 
-**Pass 2 — Context boost:** Inline annotations from each occurrence contribute a confidence score. Annotations like `Supports` and `Opposes` add a strong claim signal (+3); annotations like `Related` and `Jump` add a weaker concept signal (+1). If the accumulated score reaches the idea threshold, the type is upgraded accordingly.
+**Pass 2 — Context boost:** Inline annotations from each occurrence contribute a confidence score. Strong idea annotations like `Supports` and `Opposes` add +3; weak idea annotations like `Related` and `Jump` add +1. If the accumulated score reaches the idea threshold, the type is upgraded accordingly.
 
 | Type | Meaning |
 |---|---|
-| `idea` | A concept, claim, or source worth capturing as a note |
+| `idea` | An unresolved link worth capturing as a note |
 | `person` | A person reference (matched by configurable prefix, default `@`) |
 | `date` | A date reference (ISO date, week, or quarter patterns) |
 | `file` | A resource link, not a note (file extension, `/` in path, CamelCase) |
