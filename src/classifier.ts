@@ -77,16 +77,16 @@ function heuristicClass(target: string, feats: TitleFeatures, h: Heuristics): [s
 
 export class Classifier {
   private citationFolders: string[];
-  private claimAnnotations: Set<string>;
-  private ideaAnnotations: Set<string>;
+  private strongIdeaAnnotations: Set<string>;
+  private weakIdeaAnnotations: Set<string>;
   private personPrefix: string;
   private heuristics: Heuristics;
 
   constructor(config: CollectionConfig) {
     const cc = config.classifier;
     this.citationFolders = [...cc.citation_folders];
-    this.claimAnnotations = new Set(cc.claim_annotations);
-    this.ideaAnnotations = new Set(cc.claim_or_concept_annotations);
+    this.strongIdeaAnnotations = new Set(cc.strong_idea_annotations);
+    this.weakIdeaAnnotations = new Set(cc.weak_idea_annotations);
     this.personPrefix = cc.person_prefix;
     this.heuristics = heuristicsFromConfig(cc);
   }
@@ -94,9 +94,9 @@ export class Classifier {
   private contextBoost(occurrences: Occurrence[]): number {
     let score = 0;
     for (const occ of occurrences) {
-      if (occ.semantic_type && this.claimAnnotations.has(occ.semantic_type)) {
+      if (occ.semantic_type && this.strongIdeaAnnotations.has(occ.semantic_type)) {
         score += 3;
-      } else if (occ.semantic_type && this.ideaAnnotations.has(occ.semantic_type)) {
+      } else if (occ.semantic_type && this.weakIdeaAnnotations.has(occ.semantic_type)) {
         score += 1;
       }
       if (

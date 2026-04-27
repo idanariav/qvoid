@@ -19,8 +19,8 @@ export const DEFAULT_CONFIG = {
   classifier: {
     exclude_types: [] as string[],
     citation_folders: [] as string[],
-    claim_annotations: ["Supports", "Opposes", "Weakens", "Reminds"],
-    claim_or_concept_annotations: ["Jump", "Related", "Aka"],
+    strong_idea_annotations: ["Supports", "Opposes", "Weakens", "Reminds"],
+    weak_idea_annotations: ["Jump", "Related", "Aka"],
     person_prefix: "@",
     heuristics: {
       date: true,
