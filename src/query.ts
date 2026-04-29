@@ -2,7 +2,7 @@ import type { LinkRecord } from "./types.js";
 
 export interface FilterOpts {
   origin?: string;
-  destination?: string;
+  destination?: string | string[];
   semanticType?: string;
   minOccurrences?: number;
   search?: string;
@@ -21,14 +21,20 @@ export function matchSearch(link: LinkRecord, q: string): boolean {
   const ql = q.toLowerCase();
   if (link.normalized.includes(ql)) return true;
   return link.occurrences.some(
-    (o) => o.context_before.toLowerCase().includes(ql) || o.context_after.toLowerCase().includes(ql),
+    (o) =>
+      (o.alias !== undefined && o.alias.toLowerCase().includes(ql)) ||
+      o.context_before.toLowerCase().includes(ql) ||
+      o.context_after.toLowerCase().includes(ql),
   );
 }
 
 export function filterLinks(links: LinkRecord[], opts: FilterOpts): LinkRecord[] {
   let results = links.filter((link) => {
     if (opts.origin && !matchOrigin(link, opts.origin)) return false;
-    if (opts.destination && link.expected_destination !== opts.destination) return false;
+    if (opts.destination) {
+      const dests = Array.isArray(opts.destination) ? opts.destination : [opts.destination];
+      if (!dests.includes(link.expected_destination)) return false;
+    }
     if (opts.semanticType && !matchSemantic(link, opts.semanticType)) return false;
     if (opts.minOccurrences !== undefined && link.stats.total_occurrences < opts.minOccurrences) return false;
     if (opts.search && !matchSearch(link, opts.search)) return false;

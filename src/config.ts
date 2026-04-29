@@ -33,7 +33,7 @@ export const DEFAULT_CONFIG = {
     },
   },
   embeddings: {
-    model: "Xenova/all-MiniLM-L6-v2",
+    model: "Xenova/bge-small-en-v1.5",
   },
 } as const;
 

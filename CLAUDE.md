@@ -19,7 +19,7 @@ qvoid embed                             # Generate vector embeddings (required f
 qvoid embed --force                     # Rebuild all embeddings from scratch
 
 qvoid query                             # List all unresolved links
-qvoid query --destination idea          # Filter by type: idea | person | date | file | template | unknown
+qvoid query --destination idea          # Filter by type: idea | person | date | file | template | unknown (comma-separated for OR)
 qvoid query --origin <folder>           # Filter by source folder prefix
 qvoid query --semantic-type Supports    # Filter by inline annotation
 qvoid query --min-occurrences 3         # Minimum occurrence count

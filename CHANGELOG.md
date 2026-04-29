@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- **OR destination filter** — `--destination` now accepts comma-separated types (`idea,unknown`) for CLI and an array via MCP, matching any of the listed types
+- **Alias-aware search** — `--search` now matches against wikilink aliases (e.g. `[[John Doe|John]]` is found by searching "John")
+- **Auto ML classification on index** — `qvoid index` automatically applies the trained Naive Bayes classifier to low-confidence records when a model is available, without a separate `qvoid classify` step
+
+### Changed
+- **Default embedding model upgraded** — Changed from `all-MiniLM-L6-v2` to `bge-small-en-v1.5` for measurably better retrieval accuracy at the same 384-dim footprint. Existing vector indexes built with the old model will be automatically rebuilt on the next `qvoid embed`
+
 ## [0.2.0] - 2026-04-25
 
 ### Added

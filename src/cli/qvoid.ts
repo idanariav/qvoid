@@ -184,6 +184,24 @@ async function cmdIndex(argv: string[]): Promise<void> {
     onProgress,
   });
   finishProgress();
+
+  const mlc = new MlClassifier();
+  if (mlc.load()) {
+    let reclassified = 0;
+    for (const link of links) {
+      if (link.classification_confidence !== "low") continue;
+      const prediction = mlc.predict(link.target);
+      if (prediction !== null && prediction !== "unknown") {
+        link.expected_destination = prediction;
+        link.classification_confidence = "medium";
+        reclassified++;
+      }
+    }
+    if (reclassified > 0) {
+      process.stderr.write(`  ML classifier reclassified ${reclassified} low-confidence records.\n`);
+    }
+  }
+
   writeJsonl(links, col.jsonlPath);
   process.stderr.write(`Wrote ${links.length} records → ${col.jsonlPath}\n`);
 }
@@ -219,9 +237,11 @@ function cmdQuery(argv: string[]): void {
     process.exit(1);
   }
   const links = readJsonl(col.jsonlPath);
+  const destRaw = flagStr(flags["destination"]);
+  const destination = destRaw ? destRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
   const filtered = filterLinks(links, {
     origin: flagStr(flags["origin"]),
-    destination: flagStr(flags["destination"]),
+    destination,
     semanticType: flagStr(flags["semantic-type"]),
     minOccurrences: flagNum(flags["min-occurrences"]),
     search: flagStr(flags["search"]),

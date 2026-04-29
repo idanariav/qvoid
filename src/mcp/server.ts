@@ -40,7 +40,13 @@ export async function startMcp(): Promise<void> {
           type: "object",
           properties: {
             collection: { type: "string", description: "Collection name (omit to auto-detect)" },
-            destination: { type: "string", enum: [...DESTINATION_TYPES], description: "Filter by link type" },
+            destination: {
+              oneOf: [
+                { type: "string", enum: [...DESTINATION_TYPES] },
+                { type: "array", items: { type: "string", enum: [...DESTINATION_TYPES] } },
+              ],
+              description: "Filter by link type — one value or an array for OR matching",
+            },
             origin: { type: "string", description: "Source path prefix, e.g. Sources/Articles" },
             semantic_type: { type: "string", description: "Inline annotation name, e.g. Supports" },
             min_occurrences: { type: "number", description: "Minimum occurrence count across the vault" },
@@ -99,8 +105,10 @@ export async function startMcp(): Promise<void> {
       try {
         const col = resolveCollection(str(args["collection"]));
         const links = readJsonl(col.jsonlPath);
+        const destRaw = args["destination"];
+        const destination = Array.isArray(destRaw) ? (destRaw as string[]) : str(destRaw);
         const filtered = filterLinks(links, {
-          destination: str(args["destination"]),
+          destination,
           origin: str(args["origin"]),
           semanticType: str(args["semantic_type"]),
           minOccurrences: num(args["min_occurrences"]),

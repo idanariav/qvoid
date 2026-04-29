@@ -22,7 +22,7 @@ This means targets with richer occurrence context get more informative embedding
 
 ## Model
 
-- **Name:** `Xenova/all-MiniLM-L6-v2` (default; configurable via `embeddings.model` in TOML)
+- **Name:** `Xenova/bge-small-en-v1.5` (default; configurable via `embeddings.model` in TOML)
 - **Dimension:** 384
 - **Format:** ONNX, ~25 MB, downloaded once from HuggingFace Hub
 - **Runtime:** `@huggingface/transformers` with `HF_HUB_OFFLINE=1` — never fetches after first download

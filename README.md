@@ -136,7 +136,7 @@ qvoid query --destination idea --format detailed
 
 | Flag | Description |
 |---|---|
-| `--destination` | Filter by type: `idea`, `person`, `date`, `file`, `template`, `unknown` |
+| `--destination` | Filter by type: `idea`, `person`, `date`, `file`, `template`, `unknown` — comma-separated for OR (e.g. `idea,unknown`) |
 | `--origin` | Source folder prefix (e.g. `Sources/Articles`) |
 | `--semantic-type` | Match a specific inline annotation (e.g. `Supports`, `Opposes`) |
 | `--min-occurrences` | Minimum number of times the target appears across the vault |
@@ -197,7 +197,7 @@ Each unresolved link target is classified into one of six types using a two-pass
 
 ### 3. Embedding and Similarity
 
-When you run `qvoid embed`, each unique unresolved target is encoded into a dense vector using the `all-MiniLM-L6-v2` ONNX model (~25 MB, downloaded once). These vectors are stored locally alongside the index.
+When you run `qvoid embed`, each unique unresolved target is encoded into a dense vector using the `bge-small-en-v1.5` ONNX model (~25 MB, downloaded once). These vectors are stored locally alongside the index.
 
 `find-similar` uses cosine similarity to surface targets that are semantically close — either to a query phrase or to each other (clustering mode). This lets you catch duplicates like `"mental models"` and `"thinking frameworks"` before creating redundant notes.
 
@@ -208,7 +208,7 @@ When you run `qvoid embed`, each unique unresolved target is encoded into a dens
 qvoid runs entirely on your device. No data ever leaves your machine.
 
 - **No cloud indexing** — the vault scanner reads files directly from disk.
-- **No remote API calls** — the embedding model (`all-MiniLM-L6-v2`) runs locally via ONNX Runtime.
+- **No remote API calls** — the embedding model (`bge-small-en-v1.5`) runs locally via ONNX Runtime.
 - **No telemetry** — nothing is phoned home.
 - **Data stays local** — the index, vectors, and config are all written to standard local directories (`~/.config/qvoid/`, `~/.local/share/qvoid/`), never synced externally.
 

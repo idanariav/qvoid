@@ -13,13 +13,15 @@ All filter fields are optional; unset fields are skipped. Filters are AND-combin
 | Field | Matches against | Match function |
 |---|---|---|
 | `origin` | Any `occ.source.startsWith(origin)` | `matchOrigin()` |
-| `destination` | `link.expected_destination` | exact equality |
+| `destination` | `link.expected_destination` | OR match across one or more types |
 | `semanticType` | Any `occ.semantic_type === semanticType` | `matchSemantic()` |
 | `minOccurrences` | `link.stats.total_occurrences >= minOccurrences` | threshold |
-| `search` | `link.normalized` or any `occ.context_before/after` | `matchSearch()` — case-insensitive substring |
+| `search` | `link.normalized`, any `occ.alias`, or any `occ.context_before/after` | `matchSearch()` — case-insensitive substring |
 | `limit` | result slice | post-sort |
 
 Valid `destination` values: `"idea"`, `"person"`, `"date"`, `"file"`, `"template"`, `"unknown"`.
+
+`destination` accepts a single string or an array of strings — results match any of the listed types (OR logic). CLI: comma-separated (`--destination idea,unknown`). MCP: string or array.
 
 ## Output Formatters
 
@@ -35,7 +37,7 @@ Both in `src/query.ts`:
 | Flag | FilterOpts field |
 |---|---|
 | `--origin <prefix>` | `origin` |
-| `--destination <type>` | `destination` |
+| `--destination <type>[,<type>]` | `destination` — comma-separated for OR |
 | `--semantic-type <key>` | `semanticType` |
 | `--min-occurrences <n>` | `minOccurrences` |
 | `--search <term>` | `search` |
