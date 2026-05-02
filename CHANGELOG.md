@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-02
+
 ### Added
 - **OR destination filter** — `--destination` now accepts comma-separated types (`idea,unknown`) for CLI and an array via MCP, matching any of the listed types
 - **Alias-aware search** — `--search` now matches against wikilink aliases (e.g. `[[John Doe|John]]` is found by searching "John")
@@ -9,6 +11,8 @@
 
 ### Changed
 - **Default embedding model upgraded** — Changed from `all-MiniLM-L6-v2` to `bge-small-en-v1.5` for measurably better retrieval accuracy at the same 384-dim footprint. Existing vector indexes built with the old model will be automatically rebuilt on the next `qvoid embed`
+- **AST-based wikilink parser** — Replaced regex-based parsing with a unified/remark AST pipeline (`src/parser.ts`); semantic type resolution is now structural rather than a line-window heuristic, improving accuracy for long field names and multi-wikilink inline fields. Removes `annotation_pattern` from the TOML config (no longer needed)
+- **Annotation config keys renamed** — `claim_annotations` → `strong_idea_annotations` and `claim_or_concept_annotations` → `weak_idea_annotations` in the `[classifier]` TOML section. Update your collection config if you customized these keys
 
 ## [0.2.0] - 2026-04-25
 
