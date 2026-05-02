@@ -1,6 +1,6 @@
 {
   "name": "@idan_ariav/qvoid",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Index, query, and dedup unresolved wikilinks across Obsidian-style vaults — with MCP server for Claude Code.",
   "type": "module",
   "main": "dist/index.js",
