@@ -104,13 +104,10 @@ function wikilinkFromMarkdown() {
       wikiLink(this: any, token: any) {
         this.enter({ type: "wikiLink", target: "", alias: undefined }, token);
       },
-      wikiLinkData(this: any) {
-        this.buffer();
-      },
     },
     exit: {
-      wikiLinkData(this: any) {
-        const raw = this.resume() as string;
+      wikiLinkData(this: any, token: any) {
+        const raw = this.sliceSerialize(token) as string;
         const node = this.stack[this.stack.length - 1] as WikiLinkNode;
         let target = raw;
         let alias: string | undefined;
