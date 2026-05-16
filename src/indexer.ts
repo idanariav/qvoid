@@ -204,6 +204,7 @@ async function fullBuild(
   const links: LinkRecord[] = [];
   for (const target of [...targetToSources.keys()].sort()) {
     const occs = occurrencesByTarget.get(target) ?? [];
+    if (occs.length === 0) continue;
     const [cls, conf, feats] = classifier.classify(target, occs);
     if (excludeTypes.has(cls)) continue;
     links.push(linkToRecord({ target, normalized: normalize(target), expected_destination: cls, classification_confidence: conf, title_features: feats, occurrences: occs }));
@@ -300,6 +301,7 @@ async function incrementalBuild(
   const links: LinkRecord[] = [];
   for (const target of [...occurrencesByTarget.keys()].sort()) {
     const occs = occurrencesByTarget.get(target) ?? [];
+    if (occs.length === 0) continue;
     let cls: string, conf: string, feats: ReturnType<Classifier["classify"]>[2];
     if (targetsStale.has(target) || !oldClassification.has(target)) {
       [cls, conf, feats] = classifier.classify(target, occs);
