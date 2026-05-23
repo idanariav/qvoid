@@ -38,8 +38,6 @@ jobs:
           else
             npm publish --provenance --access public
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Extract release notes
         id: notes
