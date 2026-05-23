@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-23
+
+### Fixed
+- **Wikilink target parsing** — Replaced `buffer()`/`resume()` with `sliceSerialize()` to correctly capture wikilink target text; the previous approach silently read every target as an empty string due to `wikiLinkData` not being registered with `onenterdata` in mdast-util-from-markdown v2
+- **Ghost records in index output** — Targets whose occurrences are fully removed (deleted or modified source files) were still written as zero-occurrence `LinkRecord`s; they are now dropped, keeping the "Wrote N records" count accurate
+
 ## [0.3.0] - 2026-05-02
 
 ### Added
