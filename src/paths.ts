@@ -28,3 +28,13 @@ export function collectionConfigPath(name: string): string {
 export function collectionDataDir(name: string): string {
   return join(dataDir(), name);
 }
+
+// ML classifier model/training data is shared across all collections, so it lives
+// directly under the data dir rather than under a per-collection subdirectory.
+export function mlModelPath(): string {
+  return join(dataDir(), "classifier.json");
+}
+
+export function mlTrainingDataPath(): string {
+  return join(dataDir(), "training_data.json");
+}

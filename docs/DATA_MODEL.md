@@ -12,7 +12,7 @@ One record per place a wikilink target appears in the vault.
 | `source_folder` | `string` | First two path segments (e.g. `Notes/Ideas`) — used for origin filtering |
 | `line` | `number` | 1-indexed line number in the source file |
 | `alias` | `string?` | Display alias if `[[target\|alias]]` syntax was used |
-| `semantic_type` | `string?` | Inline field key from `(Type:: [[target]])` — e.g. `Supports`, `Related` |
+| `semantic_type` | `string?` | Inline field key from `(Type:: [[target]])` — e.g. `Supports`, `Related`. Wikilinks found inside YAML frontmatter are tagged `"frontmatter"` |
 | `context_before` | `string` | Up to 200 characters before the wikilink (sentence-level window) |
 | `context_after` | `string` | Up to 200 characters after the wikilink |
 
@@ -44,8 +44,8 @@ One record per unique unresolved target across the vault.
 interface UnresolvedLink {
   target: string;                    // Raw wikilink target
   normalized: string;                // Lowercase, trimmed, whitespace-collapsed
-  expected_destination: string;      // "idea" | "person" | "date" | "file" | "template" | "unknown"
-  classification_confidence: string; // "high" | "medium" | "low"
+  expected_destination: Destination;      // "idea" | "person" | "date" | "file" | "template" | "unknown"
+  classification_confidence: Confidence;  // "high" | "medium" | "low"
   title_features: TitleFeatures;
   occurrences: Occurrence[];
 }

@@ -1,3 +1,4 @@
+import { createRequire } from "module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -5,8 +6,11 @@ import { resolveCollection } from "../config.js";
 import { readJsonl } from "../indexer.js";
 import { clusterDuplicates, findSimilar } from "../embeddings.js";
 import { filterLinks } from "../query.js";
+import { DESTINATIONS } from "../types.js";
 
-const DESTINATION_TYPES = ["idea", "person", "date", "file", "template", "unknown"] as const;
+const require = createRequire(import.meta.url);
+// Both src/mcp/server.ts (tsx) and dist/mcp/server.js sit two levels below project root
+const { version: packageVersion } = require("../../package.json") as { version: string };
 
 function jsonText(obj: unknown): { content: { type: "text"; text: string }[] } {
   return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] };
@@ -25,7 +29,7 @@ function num(v: unknown): number | undefined {
 
 export async function startMcp(): Promise<void> {
   const server = new Server(
-    { name: "qvoid", version: "0.1.0" },
+    { name: "qvoid", version: packageVersion },
     { capabilities: { tools: {} } },
   );
 
@@ -42,8 +46,8 @@ export async function startMcp(): Promise<void> {
             collection: { type: "string", description: "Collection name (omit to auto-detect)" },
             destination: {
               oneOf: [
-                { type: "string", enum: [...DESTINATION_TYPES] },
-                { type: "array", items: { type: "string", enum: [...DESTINATION_TYPES] } },
+                { type: "string", enum: [...DESTINATIONS] },
+                { type: "array", items: { type: "string", enum: [...DESTINATIONS] } },
               ],
               description: "Filter by link type — one value or an array for OR matching",
             },

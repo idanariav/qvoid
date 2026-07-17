@@ -45,6 +45,8 @@ npm run build                # Compile TypeScript → dist/
 npm test                     # Run test suite (vitest)
 ```
 
+Known deferred work is tracked in [.claude/techdebt.md](.claude/techdebt.md) — check it for context before touching an area that might already have an open follow-up, and log new deferred items there when you intentionally punt on something.
+
 ## Important: Do NOT run automatically
 
 - Never run `qvoid index`, `qvoid embed`, or `qvoid classify` automatically — these modify user data

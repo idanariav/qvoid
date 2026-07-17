@@ -25,31 +25,38 @@ async function walkVault(vaultRoot: string): Promise<VaultInfo> {
   const fileMtimes = new Map<string, number>();
   const resolvedStems = new Set<string>();
 
-  const files = await fg("**/*.md", {
+  const entries = await fg("**/*.md", {
     cwd: vaultRoot,
     absolute: false,
     suppressErrors: true,
     dot: false,
+    stats: true,
   });
 
-  for (const rel of files) {
-    const abs = path.join(vaultRoot, rel);
-    try {
-      const stat = fs.statSync(abs);
-      fileMtimes.set(rel, stat.mtimeMs);
-      resolvedStems.add(path.basename(rel, ".md").toLowerCase());
-    } catch {
-      // skip inaccessible files
-    }
+  for (const entry of entries) {
+    fileMtimes.set(entry.path, entry.stats!.mtimeMs);
+    resolvedStems.add(path.basename(entry.path, ".md").toLowerCase());
   }
   return { fileMtimes, resolvedStems };
 }
 
-function isResolved(target: string, resolvedStems: Set<string>, vaultRoot: string): boolean {
+function isResolved(
+  target: string,
+  resolvedStems: Set<string>,
+  vaultRoot: string,
+  cache: Map<string, boolean>,
+): boolean {
+  const cached = cache.get(target);
+  if (cached !== undefined) return cached;
+
   const stem = path.basename(target).toLowerCase().replace(/\.md$/i, "");
-  if (resolvedStems.has(stem)) return true;
-  const candidate = path.join(vaultRoot, target.endsWith(".md") ? target : target + ".md");
-  return fs.existsSync(candidate);
+  let result = resolvedStems.has(stem);
+  if (!result) {
+    const candidate = path.join(vaultRoot, target.endsWith(".md") ? target : target + ".md");
+    result = fs.existsSync(candidate);
+  }
+  cache.set(target, result);
+  return result;
 }
 
 function readFile(vaultRoot: string, relPath: string): string | null {
@@ -61,47 +68,30 @@ function readFile(vaultRoot: string, relPath: string): string | null {
 }
 
 /**
- * Returns the unresolved wikilink targets found in a single file using the AST
- * parser. No regex scanning.
+ * Parses a single file once and returns the occurrences of every unresolved
+ * wikilink it contains, keyed by target. One AST parse per file covers both
+ * target discovery and occurrence/context extraction.
  */
-function extractUnresolvedFromFile(
+function scanFileForUnresolvedLinks(
   vaultRoot: string,
   relPath: string,
   resolvedStems: Set<string>,
   excludeExtensions: Set<string>,
-): string[] {
+  isResolvedCache: Map<string, boolean>,
+): Map<string, Occurrence[]> {
+  const results = new Map<string, Occurrence[]>();
   const text = readFile(vaultRoot, relPath);
-  if (text === null) return [];
+  if (text === null) return results;
 
   const tree = parseMarkdownAST(text);
-  const seen = new Set<string>();
-  for (const { target } of extractWikiLinks(tree)) {
-    if (!target) continue;
-    const ext = path.extname(target).toLowerCase();
+  for (const link of extractWikiLinks(tree, text)) {
+    if (!link.target) continue;
+    const ext = path.extname(link.target).toLowerCase();
     if (excludeExtensions.has(ext)) continue;
-    if (!isResolved(target, resolvedStems, vaultRoot)) seen.add(target);
-  }
-  return [...seen];
-}
+    if (isResolved(link.target, resolvedStems, vaultRoot, isResolvedCache)) continue;
 
-/**
- * Scans a single file and emits (target, Occurrence) pairs for every wikilink
- * whose target is in `expectedTargets`. Context and semantic type come from the
- * AST rather than ad-hoc regexes.
- */
-function scanFile(
-  vaultRoot: string,
-  relPath: string,
-  expectedTargets: Set<string>,
-  text: string,
-): [string, Occurrence][] {
-  const tree = parseMarkdownAST(text);
-  const results: [string, Occurrence][] = [];
-
-  for (const link of extractWikiLinks(tree)) {
-    if (!expectedTargets.has(link.target)) continue;
     const [ctxBefore, ctxAfter] = extractContext(text, link.startOffset, link.endOffset);
-    results.push([link.target, {
+    const occ: Occurrence = {
       source: relPath,
       source_folder: sourceFolder(relPath),
       line: link.line,
@@ -109,9 +99,20 @@ function scanFile(
       semantic_type: link.semanticType,
       context_before: ctxBefore,
       context_after: ctxAfter,
-    }]);
+    };
+    const list = results.get(link.target) ?? [];
+    list.push(occ);
+    results.set(link.target, list);
   }
   return results;
+}
+
+function mergeInto(target: Map<string, Occurrence[]>, source: Map<string, Occurrence[]>): void {
+  for (const [key, occs] of source) {
+    const list = target.get(key) ?? [];
+    list.push(...occs);
+    target.set(key, list);
+  }
 }
 
 interface ScanManifest {
@@ -152,6 +153,28 @@ function occurrenceFromRecord(o: Occurrence): Occurrence {
   };
 }
 
+/**
+ * Classifies each target's occurrences into a sorted LinkRecord list.
+ * `reuseClassification` lets incremental builds skip reclassifying targets
+ * whose occurrences didn't change.
+ */
+function buildLinkRecords(
+  occurrencesByTarget: Map<string, Occurrence[]>,
+  classifier: Classifier,
+  excludeTypes: Set<string>,
+  reuseClassification?: (target: string) => ReturnType<Classifier["classify"]> | undefined,
+): LinkRecord[] {
+  const links: LinkRecord[] = [];
+  for (const target of [...occurrencesByTarget.keys()].sort()) {
+    const occs = occurrencesByTarget.get(target) ?? [];
+    if (occs.length === 0) continue;
+    const [cls, conf, feats] = reuseClassification?.(target) ?? classifier.classify(target, occs);
+    if (excludeTypes.has(cls)) continue;
+    links.push(linkToRecord({ target, normalized: normalize(target), expected_destination: cls, classification_confidence: conf, title_features: feats, occurrences: occs }));
+  }
+  return links;
+}
+
 async function fullBuild(
   vaultRoot: string,
   fileMtimes: Map<string, number>,
@@ -167,49 +190,17 @@ async function fullBuild(
     filesToScan = filesToScan.filter((f) => originFolders.some((p) => f.startsWith(p)));
   }
 
-  const targetToSources = new Map<string, Set<string>>();
-  for (const relPath of filesToScan) {
-    const targets = extractUnresolvedFromFile(vaultRoot, relPath, resolvedStems, excludeExtensions);
-    for (const t of targets) {
-      const s = targetToSources.get(t) ?? new Set();
-      s.add(relPath);
-      targetToSources.set(t, s);
-    }
-  }
-
-  const sourceToTargets = new Map<string, Set<string>>();
-  for (const [target, srcs] of targetToSources) {
-    for (const src of srcs) {
-      const ts = sourceToTargets.get(src) ?? new Set();
-      ts.add(target);
-      sourceToTargets.set(src, ts);
-    }
-  }
-
   const occurrencesByTarget = new Map<string, Occurrence[]>();
+  const isResolvedCache = new Map<string, boolean>();
   let i = 0;
-  const total = sourceToTargets.size;
-  for (const [source, targets] of sourceToTargets) {
+  const total = filesToScan.length;
+  for (const relPath of filesToScan) {
     ++i;
     onProgress?.(i, total);
-    const text = readFile(vaultRoot, source);
-    if (text === null) continue;
-    for (const [target, occ] of scanFile(vaultRoot, source, targets, text)) {
-      const list = occurrencesByTarget.get(target) ?? [];
-      list.push(occ);
-      occurrencesByTarget.set(target, list);
-    }
+    mergeInto(occurrencesByTarget, scanFileForUnresolvedLinks(vaultRoot, relPath, resolvedStems, excludeExtensions, isResolvedCache));
   }
 
-  const links: LinkRecord[] = [];
-  for (const target of [...targetToSources.keys()].sort()) {
-    const occs = occurrencesByTarget.get(target) ?? [];
-    if (occs.length === 0) continue;
-    const [cls, conf, feats] = classifier.classify(target, occs);
-    if (excludeTypes.has(cls)) continue;
-    links.push(linkToRecord({ target, normalized: normalize(target), expected_destination: cls, classification_confidence: conf, title_features: feats, occurrences: occs }));
-  }
-  return links;
+  return buildLinkRecords(occurrencesByTarget, classifier, excludeTypes);
 }
 
 async function incrementalBuild(
@@ -241,13 +232,14 @@ async function incrementalBuild(
   process.stderr.write(`  ${changed.length} modified/new, ${deleted.length} deleted source files.\n`);
 
   const oldLinksRaw = readJsonl(existingJsonl);
+  const isResolvedCache = new Map<string, boolean>();
 
   const occurrencesByTarget = new Map<string, Occurrence[]>();
-  const oldClassification = new Map<string, [string, string, ReturnType<Classifier["classify"]>[2]]>();
+  const oldClassification = new Map<string, ReturnType<Classifier["classify"]>>();
 
   for (const link of oldLinksRaw) {
     const target = link.target;
-    if (isResolved(target, resolvedStems, vaultRoot)) continue;
+    if (isResolved(target, resolvedStems, vaultRoot, isResolvedCache)) continue;
     const kept = link.occurrences.filter((o: Occurrence) => !staleSources.has(o.source)).map(occurrenceFromRecord);
     occurrencesByTarget.set(target, kept);
     oldClassification.set(target, [link.expected_destination, link.classification_confidence, link.title_features]);
@@ -265,53 +257,22 @@ async function incrementalBuild(
     filesToRescan = filesToRescan.filter((f) => originFolders.some((p) => f.startsWith(p)));
   }
 
-  const newTargetToSources = new Map<string, Set<string>>();
-  for (const relPath of filesToRescan) {
-    const targets = extractUnresolvedFromFile(vaultRoot, relPath, resolvedStems, excludeExtensions);
-    for (const t of targets) {
-      targetsStale.add(t);
-      const s = newTargetToSources.get(t) ?? new Set();
-      s.add(relPath);
-      newTargetToSources.set(t, s);
-    }
-  }
-
-  const newSourceToTargets = new Map<string, Set<string>>();
-  for (const [target, srcs] of newTargetToSources) {
-    for (const src of srcs) {
-      const ts = newSourceToTargets.get(src) ?? new Set();
-      ts.add(target);
-      newSourceToTargets.set(src, ts);
-    }
-  }
   let scanDone = 0;
-  const scanTotal = newSourceToTargets.size;
-  for (const [source, targets] of newSourceToTargets) {
+  const scanTotal = filesToRescan.length;
+  for (const relPath of filesToRescan) {
     ++scanDone;
     onProgress?.(scanDone, scanTotal);
-    const text = readFile(vaultRoot, source);
-    if (text === null) continue;
-    for (const [target, occ] of scanFile(vaultRoot, source, targets, text)) {
-      const list = occurrencesByTarget.get(target) ?? [];
-      list.push(occ);
-      occurrencesByTarget.set(target, list);
-    }
+    const fileLinks = scanFileForUnresolvedLinks(vaultRoot, relPath, resolvedStems, excludeExtensions, isResolvedCache);
+    for (const target of fileLinks.keys()) targetsStale.add(target);
+    mergeInto(occurrencesByTarget, fileLinks);
   }
 
-  const links: LinkRecord[] = [];
-  for (const target of [...occurrencesByTarget.keys()].sort()) {
-    const occs = occurrencesByTarget.get(target) ?? [];
-    if (occs.length === 0) continue;
-    let cls: string, conf: string, feats: ReturnType<Classifier["classify"]>[2];
-    if (targetsStale.has(target) || !oldClassification.has(target)) {
-      [cls, conf, feats] = classifier.classify(target, occs);
-    } else {
-      [cls, conf, feats] = oldClassification.get(target)!;
-    }
-    if (excludeTypes.has(cls)) continue;
-    links.push(linkToRecord({ target, normalized: normalize(target), expected_destination: cls, classification_confidence: conf, title_features: feats, occurrences: occs }));
-  }
-  return links;
+  return buildLinkRecords(
+    occurrencesByTarget,
+    classifier,
+    excludeTypes,
+    (target) => (targetsStale.has(target) ? undefined : oldClassification.get(target)),
+  );
 }
 
 export interface BuildOptions {

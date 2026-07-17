@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+- **Test suite** — vitest coverage for the wikilink/frontmatter/inline-field parser, classifier heuristics, and incremental-build reconciliation (`test/`)
+- **Frontmatter wikilinks tagged, not misparsed** — YAML frontmatter is now parsed structurally via `remark-frontmatter` instead of as markdown body text, fixing a leading-`---` misparse edge case. Wikilinks inside frontmatter are still indexed but tagged with `semantic_type: "frontmatter"` so they're distinguishable from body links
+- **`-h`/`--help`/`help`** — prints the top-level command list
+
+### Changed
+- **ML classifier model/training data moved to the XDG data dir** — `classifier train`/`retrain` now write to `~/.local/share/qvoid/` instead of the package install directory, so a global npm install doesn't need write access there and upgrades no longer risk wiping your trained model. The bundled `models/classifier.json` is still shipped and used as a read-only fallback when no user-trained model exists yet. If you'd previously trained a model, your accumulated training data needs to be copied from the old `<package>/models/training_data.json` to `~/.local/share/qvoid/training_data.json` (or `$XDG_DATA_HOME/qvoid/`) before your next `classifier train --append`
+- **Collection config is now validated with zod** — misspelled or unrecognized keys in a collection's TOML config, and values of the wrong type, now fail loudly at load time with the offending path and file instead of being silently ignored
+- **Faster indexing** — full and incremental builds now parse each file once instead of twice, and `isResolved`/`walkVault` filesystem checks are cached/batched, reducing indexing I/O
+- **Incremental embeddings now detect changed contexts** — `qvoid embed` re-embeds a target when its occurrence contexts changed, instead of only on `--force`
+- Classifier output types (`expected_destination`, `classification_confidence`) are now compile-time checked instead of plain `string`
+
+### Fixed
+- MCP server reported a hardcoded version (`0.1.0`); now reads it from `package.json`
+- Error messages referenced the removed `qvoid init` command instead of `qvoid collection`
+- Negative numeric flag values (e.g. `--min-score -0.5`) were silently dropped — the value was treated as a stray positional and the flag became `true`
+
 ## [0.3.1] - 2026-05-23
 
 ### Fixed

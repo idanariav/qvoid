@@ -19,26 +19,16 @@ Returns `LinkRecord[]` and writes `unresolved_links.jsonl` + `scan_manifest.json
 - **Full build** (`fullBuild()`): no scan manifest exists, `--force` was passed, or `origin_folders` config changed. Scans every file.
 - **Incremental build** (`incrementalBuild()`): scan manifest exists and vault config is unchanged. Identifies `staleSources` (added/modified/deleted files) and rescans only those.
 
-## Phase 3 — Two-Pass Extraction
+## Phase 3 — Single-Pass Extraction
 
-### Pass 1 — Unresolved target discovery
-
-`extractUnresolvedFromFile(vaultRoot, relPath, resolvedStems, excludeExtensions)` is called for each file:
+`scanFileForUnresolvedLinks(vaultRoot, relPath, resolvedStems, excludeExtensions, isResolvedCache)` is called once per file (per candidate file in a full build, per changed file in an incremental build):
 
 1. Reads file, calls `parseMarkdownAST(text)` → unified/remark MDAST with custom WikiLink nodes
-2. Calls `extractWikiLinks(tree)` → `ParsedWikiLink[]`
-3. Filters out targets that are resolved (match a `resolvedStem` or a literal file path) or have an excluded extension
-4. Returns the list of unresolved target strings from that file
+2. Calls `extractWikiLinks(tree, text)` → `ParsedWikiLink[]`
+3. For each link, skips excluded extensions and resolved targets (`isResolved`, memoized per build via `isResolvedCache` — a `Map<target, boolean>` — since the same target is often referenced from many files)
+4. For the remaining unresolved links, calls `extractContext(text, startOffset, endOffset)` → `{ context_before, context_after }` (200-char sentence windows) and builds an `Occurrence` with `source`, `source_folder`, `line`, `alias`, `semantic_type`
 
-Result: `targetToSources: Map<target, Set<sourceFile>>` and `sourceToTargets: Map<sourceFile, Set<target>>`.
-
-### Pass 2 — Occurrence collection
-
-`scanFile(vaultRoot, relPath, targets, resolvedStems, excludeExtensions)` re-parses each source file that contains at least one relevant target:
-
-- Calls `parseMarkdownAST` + `extractWikiLinks` again
-- For each wikilink in `targets`, records an `Occurrence` with `source`, `source_folder`, `line`, `alias`, `semantic_type`
-- Calls `extractContext(text, startOffset, endOffset)` → `{ context_before, context_after }` (200-char sentence windows)
+Target discovery and occurrence collection happen from the same AST walk — each file is parsed exactly once. Results from all scanned files are merged into `occurrencesByTarget: Map<target, Occurrence[]>` via `mergeInto`.
 
 ## Phase 4 — Classification
 
@@ -50,9 +40,11 @@ For each unique unresolved target, `classifier.classify(target, occurrences)` is
 
 - Loads previous `LinkRecord[]` from JSONL
 - Removes occurrences whose `source` is in `staleSources`
-- Re-runs passes 1 & 2 only for stale files
+- Re-runs Phase 3 only for stale files
 - Merges new occurrences into existing records
 - Re-classifies only targets whose occurrence set changed; unchanged targets keep their old `expected_destination` and `classification_confidence`
+
+`buildLinkRecords` (shared by both `fullBuild` and `incrementalBuild`) does the sort + classify + `excludeTypes` filter + `linkToRecord` step; `incrementalBuild` passes a `reuseClassification` callback so unchanged targets skip reclassification.
 
 ## Persistence
 
@@ -67,8 +59,9 @@ Both in `src/indexer.ts`. Scan manifest is a plain JSON object mapping relative 
 
 `src/parser.ts` implements:
 
-- **`parseMarkdownAST(text)`** — unified + remark-parse pipeline with two custom plugins:
+- **`parseMarkdownAST(text)`** — unified + remark-parse pipeline with three plugins:
+  - `remark-frontmatter` — recognizes a leading `---`/YAML block as a single opaque node (`type: "yaml"`) instead of letting it fall through to generic block tokenization, where the leading `---` could be misparsed as a setext heading
   - micromark extension for `[[target]]`, `[[target|alias]]`, `[[target#section]]`
   - remark plugin for inline fields `(Key:: [[target]])` — captures `Key` as `semantic_type`
-- **`extractWikiLinks(tree)`** — AST visitor that yields `ParsedWikiLink` objects with offsets
+- **`extractWikiLinks(tree, fullText)`** — AST visitor that yields `ParsedWikiLink` objects with offsets. Body wikilinks come from walking `wikiLink` nodes; frontmatter wikilinks are recovered separately by regex-scanning the raw `yaml` node's text (the frontmatter block is never run through inline tokenization, so the micromark wikilink extension never sees inside it) and tagged with `semanticType: "frontmatter"`
 - **`extractContext(text, startOffset, endOffset)`** — character-offset window, respects sentence boundaries

@@ -74,9 +74,10 @@ All behaviour is controlled through `config.classifier` (set in collection TOML)
 
 `MlClassifier` in `src/ml-classifier.ts` wraps `wink-naive-bayes-text-classifier`.
 
-- Only invoked from CLI `qvoid classify` for records with `classification_confidence === "low"`
-- Model stored at `models/classifier.json`; training data at `models/training_data.json`
-- Not part of the default `buildIndex` pipeline — must be triggered explicitly
+- Applied automatically after `qvoid index` (and on demand via `qvoid classify`) to any record with `classification_confidence === "low"`, via the shared `reclassifyLowConfidence()` helper
+- Model and accumulated training data are user-writable state and live in the XDG data dir (`mlModelPath()` / `mlTrainingDataPath()` in `src/paths.ts`, e.g. `~/.local/share/qvoid/classifier.json`), so `classifier train`/`retrain` never need write access to the package install directory. `models/classifier.json` in the package is a read-only bundled default, used as a fallback when no XDG model exists yet
+- `training/` in the package is a separate, read-only seed corpus (`.txt` files per label) used to bootstrap a model via `qvoid classifier retrain` — unrelated to the user-writable training data above
+- Not part of `buildIndex` itself — it's a separate reclassification pass that runs after indexing completes
 
 ## Adding a New Heuristic
 

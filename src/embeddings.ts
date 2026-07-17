@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 import type { LinkRecord } from "./types.js";
 
 // Silence HuggingFace hub noise; never fetch model after first download.
@@ -7,6 +8,8 @@ process.env["HF_HUB_OFFLINE"] ??= "1";
 process.env["TRANSFORMERS_OFFLINE"] ??= "1";
 process.env["TRANSFORMERS_VERBOSITY"] ??= "error";
 process.env["HF_HUB_DISABLE_PROGRESS_BARS"] ??= "1";
+
+type HFTensor = { data: Float32Array; dims: number[] };
 
 let cachedPipeline: unknown = null;
 let cachedModelName = "";
@@ -27,6 +30,10 @@ function documentText(link: LinkRecord): string {
     if (occ.semantic_type) parts.push(`(${occ.semantic_type})`);
   }
   return parts.join(" | ");
+}
+
+function textHash(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
 
 function dotProduct(a: Float32Array, b: Float32Array): number {
@@ -50,6 +57,8 @@ interface VectorManifest {
   dim: number;
   count: number;
   order: string[];
+  // Content hash per target (same index as `order`); absent on pre-hash manifests.
+  hashes?: string[];
 }
 
 function loadVectors(vectorsPath: string, manifestPath: string): { vectors: Float32Array[]; manifest: VectorManifest } {
@@ -59,7 +68,7 @@ function loadVectors(vectorsPath: string, manifestPath: string): { vectors: Floa
   const { dim, count } = manifest;
   const vectors: Float32Array[] = [];
   for (let i = 0; i < count; i++) {
-    vectors.push(raw.slice(i * dim, (i + 1) * dim));
+    vectors.push(raw.subarray(i * dim, (i + 1) * dim));
   }
   return { vectors, manifest };
 }
@@ -71,18 +80,28 @@ export async function buildVectors(
   modelName: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
-  // Load existing vectors if model matches — skip already-embedded targets
-  const existing = new Map<string, Float32Array>();
+  // Load existing vectors if model matches — skip targets whose content hash is unchanged
+  const existing = new Map<string, { vec: Float32Array; hash: string | undefined }>();
   if (fs.existsSync(manifestPath) && fs.existsSync(vectorsPath)) {
     const { vectors, manifest } = loadVectors(vectorsPath, manifestPath);
     if (manifest.model === modelName) {
       for (let i = 0; i < manifest.order.length; i++) {
-        existing.set(manifest.order[i]!, vectors[i]!);
+        existing.set(manifest.order[i]!, { vec: vectors[i]!, hash: manifest.hashes?.[i] });
       }
     }
   }
 
-  const newLinks = links.filter((l) => !existing.has(l.target));
+  const textByTarget = new Map(links.map((l) => [l.target, documentText(l)] as const));
+  const hashByTarget = new Map(links.map((l) => [l.target, textHash(textByTarget.get(l.target)!)] as const));
+
+  // A target needs (re-)embedding if it's new, or its content changed since it was last embedded.
+  // Pre-hash manifest entries (hash === undefined) are reused once rather than forcing a mass re-embed.
+  const newLinks = links.filter((l) => {
+    const prior = existing.get(l.target);
+    if (!prior) return true;
+    if (prior.hash === undefined) return false;
+    return prior.hash !== hashByTarget.get(l.target);
+  });
   const skipped = links.length - newLinks.length;
 
   if (newLinks.length === 0) {
@@ -90,9 +109,8 @@ export async function buildVectors(
     return;
   }
 
-  type HFTensor = { data: Float32Array; dims: number[] };
   const pipe = await loadModel(modelName) as (texts: string[], opts: unknown) => Promise<HFTensor>;
-  const texts = newLinks.map(documentText);
+  const texts = newLinks.map((l) => textByTarget.get(l.target)!);
 
   const batchSize = 64;
   const newVecs = new Map<string, Float32Array>();
@@ -106,8 +124,9 @@ export async function buildVectors(
     onProgress?.(skipped + Math.min(i + batchSize, texts.length), links.length);
   }
 
-  // Merge: preserve order from links (drops removed targets automatically)
-  const allVecs: Float32Array[] = links.map((l) => existing.get(l.target) ?? newVecs.get(l.target)!);
+  // Merge: preserve order from links (drops removed targets automatically). Freshly
+  // (re-)embedded vectors take priority over any stale cached entry for the same target.
+  const allVecs: Float32Array[] = links.map((l) => newVecs.get(l.target) ?? existing.get(l.target)!.vec);
   const dim = allVecs[0]?.length ?? 0;
   const flatBuf = new Float32Array(allVecs.length * dim);
   for (let i = 0; i < allVecs.length; i++) {
@@ -122,6 +141,7 @@ export async function buildVectors(
     dim,
     count: allVecs.length,
     order: links.map((l) => l.target),
+    hashes: links.map((l) => hashByTarget.get(l.target)!),
   };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 }
@@ -140,7 +160,6 @@ export async function findSimilar(
   if (idx !== -1) {
     qVec = vectors[idx]!;
   } else {
-    type HFTensor = { data: Float32Array; dims: number[] };
     const pipe = await loadModel(manifest.model) as (texts: string[], opts: unknown) => Promise<HFTensor>;
     const outputs = await pipe([query], { pooling: "mean", normalize: true });
     qVec = normalizeVec(outputs.data.slice(0, outputs.dims[1]));
@@ -180,16 +199,11 @@ export function clusterDuplicates(
     if (ra !== rb) parent[ra] = rb;
   }
 
-  const CHUNK = 256;
-  for (let start = 0; start < n; start += CHUNK) {
-    const end = Math.min(start + CHUNK, n);
-    for (let i = start; i < end; i++) {
-      const vi = vectors[i]!;
-      for (let j = 0; j < n; j++) {
-        if (j === i) continue;
-        const sim = dotProduct(vi, vectors[j]!);
-        if (sim >= threshold) union(i, j);
-      }
+  for (let i = 0; i < n; i++) {
+    const vi = vectors[i]!;
+    for (let j = i + 1; j < n; j++) {
+      const sim = dotProduct(vi, vectors[j]!);
+      if (sim >= threshold) union(i, j);
     }
   }
 

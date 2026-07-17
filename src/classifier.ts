@@ -1,5 +1,5 @@
 import type { CollectionConfig } from "./config.js";
-import type { Occurrence, TitleFeatures } from "./types.js";
+import type { Confidence, Destination, Occurrence, TitleFeatures } from "./types.js";
 
 const DATE_RE = /^\d{4}-\d{2}(-\d{2})?$|^\d{4}-W\d{2}$|^\d{4}-Q[1-4]$/;
 const YEAR_IN_PARENS_RE = /\(\d{4}\)/;
@@ -53,7 +53,7 @@ export function titleFeatures(target: string, personPrefix: string): TitleFeatur
   };
 }
 
-function heuristicClass(target: string, feats: TitleFeatures, h: Heuristics): [string, string] {
+function heuristicClass(target: string, feats: TitleFeatures, h: Heuristics): [Destination, Confidence] {
   const t = target.trim();
 
   if (h.template && feats.has_template_syntax) return ["template", "high"];
@@ -110,7 +110,7 @@ export class Classifier {
     return score;
   }
 
-  classify(target: string, occurrences: Occurrence[]): [string, string, TitleFeatures] {
+  classify(target: string, occurrences: Occurrence[]): [Destination, Confidence, TitleFeatures] {
     const feats = titleFeatures(target, this.personPrefix);
     const [baseClass, baseConf] = heuristicClass(target, feats, this.heuristics);
 

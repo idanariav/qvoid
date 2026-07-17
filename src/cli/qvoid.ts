@@ -1,19 +1,19 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
+  type Collection,
   listCollections,
   loadCollection,
   registerCollection,
   removeCollection,
   resolveCollection,
-  updateCollectionConfig,
 } from "../config.js";
 import { Classifier } from "../classifier.js";
 import { buildIndex, readJsonl, writeJsonl } from "../indexer.js";
 import { buildVectors, clusterDuplicates, findSimilar } from "../embeddings.js";
 import { filterLinks, formatDetailed, formatSummary } from "../query.js";
 import { startMcp } from "../mcp/server.js";
-import { MlClassifier, MODEL_PATH, TRAINING_DATA_PATH, TRAINING_DIR, loadTrainingData, saveTrainingData } from "../ml-classifier.js";
+import { MlClassifier, MODEL_PATH, TRAINING_DATA_PATH, TRAINING_DIR, loadTrainingData, reclassifyLowConfidence, saveTrainingData } from "../ml-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Terminal / progress helpers (same pattern as qimg)
@@ -79,6 +79,20 @@ function finishProgress(): void {
   if (isTTY) process.stderr.write("\n");
 }
 
+function requireIndex(col: Collection): void {
+  if (!fs.existsSync(col.jsonlPath)) {
+    process.stderr.write(`No index found for ${JSON.stringify(col.name)}. Run \`qvoid index\` first.\n`);
+    process.exit(1);
+  }
+}
+
+function requireVectors(col: Collection): void {
+  if (!fs.existsSync(col.vectorsPath) || !fs.existsSync(col.manifestPath)) {
+    process.stderr.write(`No vector index for ${JSON.stringify(col.name)}. Run \`qvoid embed\` first.\n`);
+    process.exit(1);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Arg parsing (same hand-rolled style as qnode)
 // ---------------------------------------------------------------------------
@@ -88,6 +102,8 @@ interface ParsedArgs {
   flags: Record<string, string | boolean>;
 }
 
+const NEGATIVE_NUMBER_RE = /^-\d+(\.\d+)?$/;
+
 function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
   const flags: Record<string, string | boolean> = {};
@@ -96,7 +112,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("-")) {
+      if (next !== undefined && (!next.startsWith("-") || NEGATIVE_NUMBER_RE.test(next))) {
         flags[key] = next;
         i++;
       } else {
@@ -187,16 +203,7 @@ async function cmdIndex(argv: string[]): Promise<void> {
 
   const mlc = new MlClassifier();
   if (mlc.load()) {
-    let reclassified = 0;
-    for (const link of links) {
-      if (link.classification_confidence !== "low") continue;
-      const prediction = mlc.predict(link.target);
-      if (prediction !== null && prediction !== "unknown") {
-        link.expected_destination = prediction;
-        link.classification_confidence = "medium";
-        reclassified++;
-      }
-    }
+    const reclassified = reclassifyLowConfidence(links, mlc);
     if (reclassified > 0) {
       process.stderr.write(`  ML classifier reclassified ${reclassified} low-confidence records.\n`);
     }
@@ -210,10 +217,7 @@ async function cmdEmbed(argv: string[]): Promise<void> {
   const { flags } = parseArgs(argv);
   const col = resolveCollection(flagStr(flags["collection"]));
   const force = flags["force"] === true;
-  if (!fs.existsSync(col.jsonlPath)) {
-    process.stderr.write(`No index found for ${JSON.stringify(col.name)}. Run \`qvoid index\` first.\n`);
-    process.exit(1);
-  }
+  requireIndex(col);
   if (force) {
     for (const p of [col.vectorsPath, col.manifestPath]) {
       if (fs.existsSync(p)) fs.unlinkSync(p);
@@ -232,10 +236,7 @@ async function cmdEmbed(argv: string[]): Promise<void> {
 function cmdQuery(argv: string[]): void {
   const { flags } = parseArgs(argv);
   const col = resolveCollection(flagStr(flags["collection"]));
-  if (!fs.existsSync(col.jsonlPath)) {
-    process.stderr.write(`No index found for ${JSON.stringify(col.name)}. Run \`qvoid index\` first.\n`);
-    process.exit(1);
-  }
+  requireIndex(col);
   const links = readJsonl(col.jsonlPath);
   const destRaw = flagStr(flags["destination"]);
   const destination = destRaw ? destRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
@@ -270,10 +271,7 @@ async function cmdFindSimilar(argv: string[]): Promise<void> {
   const topK = flagNum(flags["top-k"]) ?? 10;
   const minScore = flagNum(flags["min-score"]) ?? 0.5;
 
-  if (!fs.existsSync(col.vectorsPath) || !fs.existsSync(col.manifestPath)) {
-    process.stderr.write(`No vector index for ${JSON.stringify(col.name)}. Run \`qvoid embed\` first.\n`);
-    process.exit(1);
-  }
+  requireVectors(col);
 
   if (cluster) {
     const groups = clusterDuplicates(col.vectorsPath, col.manifestPath, threshold);
@@ -310,10 +308,7 @@ async function cmdClassify(argv: string[]): Promise<void> {
   const { flags } = parseArgs(argv);
   const col = resolveCollection(flagStr(flags["collection"]));
   const dryRun = flags["dry-run"] === true;
-  if (!fs.existsSync(col.jsonlPath)) {
-    process.stderr.write(`No index found for ${JSON.stringify(col.name)}. Run \`qvoid index\` first.\n`);
-    process.exit(1);
-  }
+  requireIndex(col);
   const mlc = new MlClassifier();
   if (!mlc.load()) {
     process.stderr.write(`No trained model found at ${MODEL_PATH}. Run \`qvoid classifier train <path> <label>\` first.\n`);
@@ -344,18 +339,16 @@ async function cmdClassify(argv: string[]): Promise<void> {
     return;
   }
 
-  let updated = 0;
-  for (const link of links) {
-    if (link.classification_confidence !== "low") continue;
-    const prediction = mlc.predict(link.target);
-    if (prediction !== null && prediction !== "unknown") {
-      link.expected_destination = prediction;
-      link.classification_confidence = "medium";
-      updated++;
-    }
-  }
+  const updated = reclassifyLowConfidence(links, mlc);
   writeJsonl(links, col.jsonlPath);
   process.stderr.write(`Reclassified ${updated}/${lowConf.length} low-confidence entries → ${col.jsonlPath}\n`);
+}
+
+function saveModel(mlc: MlClassifier, outputPath: string, labels: Set<string>): void {
+  const json = mlc.finalize();
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, json);
+  process.stderr.write(`Model saved → ${outputPath} (labels: ${[...labels].join(", ")})\n`);
 }
 
 async function cmdClassifierTrain(argv: string[]): Promise<void> {
@@ -389,10 +382,7 @@ async function cmdClassifierTrain(argv: string[]): Promise<void> {
       process.exit(1);
     }
     saveTrainingData(allExamples);
-    const json = mlc.finalize();
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, json);
-    process.stderr.write(`Model saved → ${outputPath} (labels: ${[...labels].join(", ")})\n`);
+    saveModel(mlc, outputPath, labels);
     return;
   }
 
@@ -449,18 +439,23 @@ async function cmdClassifierTrain(argv: string[]): Promise<void> {
   for (const { text, label: lbl } of allExamples) {
     mlc.learn(text, lbl);
   }
-  const json = mlc.finalize();
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, json);
-  process.stderr.write(`Model saved → ${outputPath} (labels: ${[...labels].join(", ")})\n`);
+  saveModel(mlc, outputPath, labels);
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
+const USAGE =
+  "Usage: qvoid <command> [...args]\n" +
+  "Commands: collections, collection, index, embed, query, find-similar, classify, classifier [train|retrain], mcp";
+
 async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv;
+  if (cmd === "-h" || cmd === "--help" || cmd === "help") {
+    console.error(USAGE);
+    process.exit(0);
+  }
   try {
     switch (cmd) {
       case "collections": cmdCollections(rest); break;
@@ -473,10 +468,7 @@ async function main(): Promise<void> {
       case "classifier":  await cmdClassifierTrain(rest); break;
       case "mcp":         await startMcp(); break;
       default:
-        console.error(
-          "Usage: qvoid <command> [...args]\n" +
-          "Commands: collections, collection, index, embed, query, find-similar, classify, classifier [train|retrain], mcp"
-        );
+        console.error(USAGE);
         process.exit(1);
     }
   } catch (e) {

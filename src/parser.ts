@@ -1,5 +1,6 @@
 import { unified } from "unified";
 import remarkParse from "remark-parse";
+import remarkFrontmatter from "remark-frontmatter";
 import { visit } from "unist-util-visit";
 import type { Root, Text, Parent, PhrasingContent } from "mdast";
 import type { Processor } from "unified";
@@ -252,6 +253,7 @@ function transformChildren(input: readonly ContentNode[]): ContentNode[] {
 
 const processor = unified()
   .use(remarkParse)
+  .use(remarkFrontmatter, ["yaml"])
   .use(remarkWikilinks)
   .use(remarkInlineFields);
 
@@ -299,14 +301,66 @@ export function extractContext(
   return [before.trim(), after.trim()];
 }
 
+// remark-frontmatter treats the leading `---`/`+++` block as an opaque leaf node
+// (never run through inline tokenization), so our micromark wikiLink extension
+// never sees text inside it. Frontmatter wikilinks are recovered separately with
+// a plain regex scan over that node's raw slice and tagged with semanticType
+// "frontmatter" so they're distinguishable from body links.
+const FRONTMATTER_WIKILINK_RE = /\[\[([^\]\n]+)\]\]/g;
+
+function parseWikilinkInner(raw: string): { target: string; alias: string | undefined } {
+  let target = raw;
+  let alias: string | undefined;
+  const pipeIdx = target.indexOf("|");
+  if (pipeIdx !== -1) {
+    alias = target.slice(pipeIdx + 1).trim();
+    target = target.slice(0, pipeIdx);
+  }
+  for (const sep of ["#", "^"]) {
+    const idx = target.indexOf(sep);
+    if (idx !== -1) target = target.slice(0, idx);
+  }
+  return { target: target.trim(), alias };
+}
+
+function extractFrontmatterWikiLinks(tree: Root, fullText: string): ParsedWikiLink[] {
+  const results: ParsedWikiLink[] = [];
+  for (const node of tree.children) {
+    if (node.type !== "yaml") continue;
+    const startOffset = node.position?.start.offset;
+    const endOffset = node.position?.end.offset;
+    if (startOffset === undefined || endOffset === undefined) continue;
+
+    const raw = fullText.slice(startOffset, endOffset);
+    FRONTMATTER_WIKILINK_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = FRONTMATTER_WIKILINK_RE.exec(raw))) {
+      const { target, alias } = parseWikilinkInner(m[1]!);
+      if (!target) continue;
+      const linkStart = startOffset + m.index;
+      const linkEnd = linkStart + m[0].length;
+      results.push({
+        target,
+        alias,
+        semanticType: "frontmatter",
+        line: fullText.slice(0, linkStart).split("\n").length,
+        startOffset: linkStart,
+        endOffset: linkEnd,
+      });
+    }
+  }
+  return results;
+}
+
 /**
  * Walks the AST and returns one ParsedWikiLink per [[wikilink]] occurrence.
  *
  * Semantic types are resolved structurally: a wikilink that is a descendant of
  * an InlineFieldNode inherits that node's key as its semantic type, regardless
- * of how many levels deep it is nested.
+ * of how many levels deep it is nested. Wikilinks inside YAML/TOML frontmatter
+ * are tagged with semanticType "frontmatter" (see extractFrontmatterWikiLinks).
  */
-export function extractWikiLinks(tree: Root): ParsedWikiLink[] {
+export function extractWikiLinks(tree: Root, fullText: string): ParsedWikiLink[] {
   // First pass: map each wikilink's start offset → its nearest inlineField key.
   const fieldKeyByOffset = new Map<number, string>();
   visit(tree, "inlineField", (fieldNode) => {
@@ -318,7 +372,7 @@ export function extractWikiLinks(tree: Root): ParsedWikiLink[] {
     });
   });
 
-  // Second pass: collect all wikilink occurrences.
+  // Second pass: collect all body wikilink occurrences.
   const results: ParsedWikiLink[] = [];
   visit(tree, "wikiLink", (node) => {
     const wl = node as unknown as WikiLinkNode;
@@ -335,5 +389,6 @@ export function extractWikiLinks(tree: Root): ParsedWikiLink[] {
     });
   });
 
+  results.push(...extractFrontmatterWikiLinks(tree, fullText));
   return results;
 }

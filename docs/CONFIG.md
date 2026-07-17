@@ -16,7 +16,7 @@ Path helpers are in `src/paths.ts`: `configDir()`, `dataDir()`, `registryPath()`
 
 ## Config Schema
 
-`DEFAULT_CONFIG` in `src/config.ts` defines three sections:
+`CollectionConfigSchema` (a zod schema) in `src/config.ts` defines three sections; `DEFAULT_CONFIG` is `CollectionConfigSchema.parse({})`.
 
 ### `[source]`
 | Key | Default | Description |
@@ -48,15 +48,16 @@ Path helpers are in `src/paths.ts`: `configDir()`, `dataDir()`, `registryPath()`
 ### `[embeddings]`
 | Key | Default | Description |
 |---|---|---|
-| `model` | `"Xenova/all-MiniLM-L6-v2"` | HuggingFace model name for `buildVectors` / `findSimilar` |
+| `model` | `"Xenova/bge-small-en-v1.5"` | HuggingFace model name for `buildVectors` / `findSimilar` |
 
-## Merge Behaviour
+## Validation
 
-`mergeDefaults(userConfig)` in `src/config.ts` applies a shallow section-level merge:
+`parseConfig(rawCfg, cfgPath)` in `src/config.ts` runs the raw parsed TOML through `CollectionConfigSchema.safeParse()`:
 
-- **Scalar values:** user value replaces default
-- **Nested objects** (e.g. `classifier.heuristics`): shallow-merged one level deep
+- **Scalar values:** user value replaces default; wrong types (e.g. a string where an array is expected) throw with the offending path and expected type
+- **Nested objects** (e.g. `classifier.heuristics`): each field has its own default, so a partial `[classifier.heuristics]` table is effectively shallow-merged one level deep
 - **Arrays** (e.g. `strong_idea_annotations`): user array **replaces** default entirely — not appended
+- **Unrecognized keys** at any level throw (`z.strictObject`) — a typo like `origin_folers` fails loudly instead of being silently ignored
 
 Consequence: to extend `exclude_extensions`, list all desired extensions in your TOML, including the defaults you want to keep.
 
@@ -78,5 +79,4 @@ Consequence: to extend `exclude_extensions`, list all desired extensions in your
 | `loadCollection(name)` | Reads registry + TOML, merges defaults, returns `Collection` |
 | `resolveCollection(name?)` | Auto-resolve with fallback chain (see above) |
 | `removeCollection(name)` | Removes from registry only; data directory is preserved |
-| `updateCollectionConfig(name, section, updates)` | Partial section update — used internally by CLI config commands |
 | `listCollections()` | Returns registry as `Record<name, { path }>` |

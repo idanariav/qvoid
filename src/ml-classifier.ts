@@ -3,6 +3,8 @@ import * as path from "path";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { type LinkRecord, isDestination } from "./types.js";
+import { mlModelPath, mlTrainingDataPath } from "./paths.js";
 
 const require = createRequire(import.meta.url);
 
@@ -19,10 +21,16 @@ interface NaiveBayesInstance {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Both src/ml-classifier.ts (tsx) and dist/ml-classifier.js sit one level below project root
-export const MODEL_PATH = path.join(__dirname, "..", "models", "classifier.json");
-export const TRAINING_DATA_PATH = path.join(__dirname, "..", "models", "training_data.json");
+// Both src/ml-classifier.ts (tsx) and dist/ml-classifier.js sit one level below project root.
+// `training/` is a bundled read-only seed corpus shipped with the package (used by
+// `classifier retrain`); the model and its accumulated training data are user-writable
+// state and live in the XDG data dir instead, with the bundled model as a read-only
+// fallback so `classifier train`/global npm upgrades never touch (or lose write access to)
+// files inside the package install directory.
+export const BUNDLED_MODEL_PATH = path.join(__dirname, "..", "models", "classifier.json");
 export const TRAINING_DIR = path.join(__dirname, "..", "training");
+export const MODEL_PATH = mlModelPath();
+export const TRAINING_DATA_PATH = mlTrainingDataPath();
 
 interface TrainingExample {
   text: string;
@@ -47,8 +55,10 @@ export class MlClassifier {
   }
 
   load(): boolean {
-    if (!fs.existsSync(MODEL_PATH)) return false;
-    const json = fs.readFileSync(MODEL_PATH, "utf-8");
+    // A user-trained model in the XDG data dir takes priority over the bundled default.
+    const modelPath = fs.existsSync(MODEL_PATH) ? MODEL_PATH : BUNDLED_MODEL_PATH;
+    if (!fs.existsSync(modelPath)) return false;
+    const json = fs.readFileSync(modelPath, "utf-8");
     this.nbc.importJSON(json);
     this.nbc.consolidate();
     this.loaded = true;
@@ -68,6 +78,24 @@ export class MlClassifier {
     this.nbc.consolidate();
     return this.nbc.exportJSON();
   }
+}
+
+/**
+ * Reclassifies every low-confidence link in place using a trained MlClassifier.
+ * Returns the number of records updated.
+ */
+export function reclassifyLowConfidence(links: LinkRecord[], mlc: MlClassifier): number {
+  let updated = 0;
+  for (const link of links) {
+    if (link.classification_confidence !== "low") continue;
+    const prediction = mlc.predict(link.target);
+    if (prediction !== null && prediction !== "unknown" && isDestination(prediction)) {
+      link.expected_destination = prediction;
+      link.classification_confidence = "medium";
+      updated++;
+    }
+  }
+  return updated;
 }
 
 export function loadTrainingData(): TrainingExample[] {

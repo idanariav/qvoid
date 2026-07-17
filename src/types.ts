@@ -1,3 +1,12 @@
+export const DESTINATIONS = ["idea", "person", "date", "file", "template", "unknown"] as const;
+export type Destination = typeof DESTINATIONS[number];
+export function isDestination(x: string): x is Destination {
+  return (DESTINATIONS as readonly string[]).includes(x);
+}
+
+export const CONFIDENCES = ["low", "medium", "high"] as const;
+export type Confidence = typeof CONFIDENCES[number];
+
 export interface Occurrence {
   source: string;
   source_folder: string;
@@ -23,8 +32,8 @@ export interface TitleFeatures {
 export interface UnresolvedLink {
   target: string;
   normalized: string;
-  expected_destination: string;
-  classification_confidence: string;
+  expected_destination: Destination;
+  classification_confidence: Confidence;
   title_features: TitleFeatures;
   occurrences: Occurrence[];
 }

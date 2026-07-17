@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { z } from "zod";
 import { parse, stringify } from "smol-toml";
 import {
   collectionConfigPath,
@@ -7,37 +8,47 @@ import {
   registryPath,
 } from "./paths.js";
 
-export const DEFAULT_CONFIG = {
-  source: {
-    origin_folders: [] as string[],
-    exclude_extensions: [
-      ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
-      ".excalidraw", ".pdf", ".mp4", ".mov", ".mp3", ".wav", ".zip",
-    ],
-  },
-  classifier: {
-    exclude_types: [] as string[],
-    citation_folders: [] as string[],
-    strong_idea_annotations: ["Supports", "Opposes", "Weakens", "Reminds"],
-    weak_idea_annotations: ["Jump", "Related", "Aka"],
-    person_prefix: "@",
-    heuristics: {
-      date: true,
-      person: true,
-      file_extensions: true,
-      camelcase: true,
-      template: true,
-      capitalization: true,
-      min_words_for_idea: 4,
-      verb_identification: true,
-    },
-  },
-  embeddings: {
-    model: "Xenova/bge-small-en-v1.5",
-  },
-} as const;
+const HeuristicsSchema = z.strictObject({
+  date: z.boolean().default(true),
+  person: z.boolean().default(true),
+  file_extensions: z.boolean().default(true),
+  camelcase: z.boolean().default(true),
+  template: z.boolean().default(true),
+  capitalization: z.boolean().default(true),
+  min_words_for_idea: z.number().default(4),
+  verb_identification: z.boolean().default(true),
+});
 
-export type CollectionConfig = typeof DEFAULT_CONFIG;
+const SourceSchema = z.strictObject({
+  origin_folders: z.array(z.string()).default([]),
+  exclude_extensions: z.array(z.string()).default([
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
+    ".excalidraw", ".pdf", ".mp4", ".mov", ".mp3", ".wav", ".zip",
+  ]),
+});
+
+const ClassifierSchema = z.strictObject({
+  exclude_types: z.array(z.string()).default([]),
+  citation_folders: z.array(z.string()).default([]),
+  strong_idea_annotations: z.array(z.string()).default(["Supports", "Opposes", "Weakens", "Reminds"]),
+  weak_idea_annotations: z.array(z.string()).default(["Jump", "Related", "Aka"]),
+  person_prefix: z.string().default("@"),
+  heuristics: HeuristicsSchema.default(HeuristicsSchema.parse({})),
+});
+
+const EmbeddingsSchema = z.strictObject({
+  model: z.string().default("Xenova/bge-small-en-v1.5"),
+});
+
+const CollectionConfigSchema = z.strictObject({
+  source: SourceSchema.default(SourceSchema.parse({})),
+  classifier: ClassifierSchema.default(ClassifierSchema.parse({})),
+  embeddings: EmbeddingsSchema.default(EmbeddingsSchema.parse({})),
+});
+
+export type CollectionConfig = z.infer<typeof CollectionConfigSchema>;
+
+export const DEFAULT_CONFIG: CollectionConfig = CollectionConfigSchema.parse({});
 
 export class Collection {
   constructor(
@@ -62,23 +73,15 @@ function writeToml(filePath: string, data: unknown): void {
   fs.writeFileSync(filePath, stringify(data as Parameters<typeof stringify>[0]));
 }
 
-function mergeDefaults(cfg: Record<string, unknown>): CollectionConfig {
-  const result: Record<string, unknown> = {};
-  for (const [section, sectionDefaults] of Object.entries(DEFAULT_CONFIG)) {
-    const userSection = (cfg[section] ?? {}) as Record<string, unknown>;
-    const merged: Record<string, unknown> = { ...sectionDefaults as Record<string, unknown> };
-    for (const [key, userVal] of Object.entries(userSection)) {
-      const defaultVal = (sectionDefaults as Record<string, unknown>)[key];
-      if (defaultVal !== null && typeof defaultVal === "object" && !Array.isArray(defaultVal) &&
-          userVal !== null && typeof userVal === "object" && !Array.isArray(userVal)) {
-        merged[key] = { ...defaultVal as object, ...userVal as object };
-      } else {
-        merged[key] = userVal;
-      }
-    }
-    result[section] = merged;
+function parseConfig(cfg: Record<string, unknown>, cfgPath: string): CollectionConfig {
+  const result = CollectionConfigSchema.safeParse(cfg);
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`)
+      .join("\n");
+    throw new Error(`Invalid config at ${cfgPath}:\n${issues}`);
   }
-  return result as unknown as CollectionConfig;
+  return result.data;
 }
 
 interface Registry {
@@ -124,19 +127,19 @@ export function loadCollection(name: string): Collection {
   if (!entry) {
     throw new Error(
       `Unknown collection: ${JSON.stringify(name)}. Run \`qvoid collections\` to list, ` +
-      `or \`qvoid init --name <n> --path <vault>\` to register.`
+      `or \`qvoid collection <name> --path <vault>\` to register.`
     );
   }
   const cfgPath = collectionConfigPath(name);
   const rawCfg = fs.existsSync(cfgPath) ? readToml(cfgPath) : {};
-  return new Collection(name, entry.path, mergeDefaults(rawCfg));
+  return new Collection(name, entry.path, parseConfig(rawCfg, cfgPath));
 }
 
 export function resolveCollection(name?: string): Collection {
   if (!name) name = process.env["QVOID_COLLECTION"];
   const collections = listCollections();
   if (Object.keys(collections).length === 0) {
-    throw new Error("No collections registered. Run `qvoid init --name <n> --path <vault>`.");
+    throw new Error("No collections registered. Run `qvoid collection <name> --path <vault>`.");
   }
   if (name) return loadCollection(name);
 
@@ -155,12 +158,4 @@ export function resolveCollection(name?: string): Collection {
     "Multiple collections registered and CWD is outside all of them. " +
     "Pass --collection <name> or set QVOID_COLLECTION."
   );
-}
-
-export function updateCollectionConfig(name: string, section: string, updates: Record<string, unknown>): void {
-  const cfgPath = collectionConfigPath(name);
-  const cfg = fs.existsSync(cfgPath) ? readToml(cfgPath) : {};
-  const existing = (cfg[section] ?? {}) as Record<string, unknown>;
-  cfg[section] = { ...existing, ...updates };
-  writeToml(cfgPath, cfg);
 }
