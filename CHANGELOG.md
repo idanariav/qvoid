@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-07-18
 
 ### Added
 - **Test suite** — vitest coverage for the wikilink/frontmatter/inline-field parser, classifier heuristics, and incremental-build reconciliation (`test/`)
