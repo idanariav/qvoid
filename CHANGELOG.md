@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Dependency vulnerabilities** — resolved `npm audit` findings (protobufjs, hono, ip-address, qs, tar, fast-uri, vite/esbuild transitive advisories) via `npm audit fix`; bumped `vitest` (3.2.4 → 3.2.7) and `tsx` (4.21.0 → 4.23.1) to pull in patched `esbuild`
+
 ## [0.4.0] - 2026-07-18
 
 ### Added
