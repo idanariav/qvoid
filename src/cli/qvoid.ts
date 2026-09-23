@@ -294,6 +294,13 @@ async function cmdFindSimilar(argv: string[]): Promise<void> {
     process.stderr.write("No matches above threshold.\n");
     return;
   }
+
+  const format = flagStr(flags["format"]) ?? "text";
+  if (format === "json") {
+    for (const { target, score } of results) console.log(JSON.stringify({ target, score }));
+    return;
+  }
+
   console.log(`Top ${results.length} similar targets to: ${JSON.stringify(query)}`);
   for (const { target, score } of results) {
     console.log(`  ${score.toFixed(3)}  ${target}`);
