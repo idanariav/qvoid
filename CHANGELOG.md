@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **`find-similar --cluster --format json`** — emits NDJSON, one `{"size","threshold","targets"}` object per cluster, largest first. Text output remains the default; the summary stays on stderr. The MCP `cluster` tool already returns structured JSON and is unchanged
 - **`query --fields <a,b,c>`** — with `--format json`, projects each NDJSON object to the listed top-level fields (adds derived `occurrence_count`); unknown names error with the valid list. Also available as the `fields` argument of the MCP `query` tool. Default JSON output is unchanged
 - **`find-similar --format json`** — emits NDJSON (`{"target","score"}` per line) for query-phrase searches, matching `query --format json`. `--cluster` remains text-only
 

@@ -164,9 +164,12 @@ qvoid find-similar --cluster
 
 # Use a stricter similarity threshold
 qvoid find-similar --cluster --threshold 0.85
+
+# Clusters as NDJSON
+qvoid find-similar --cluster --format json | jq -c .
 ```
 
-`--format text` (default) or `json` (NDJSON). `--format` applies to query-phrase searches only; `--cluster` always prints text.
+`--format text` (default) or `json` (NDJSON). Query-phrase searches emit `{"target","score"}` per line; `--cluster` emits `{"size","threshold","targets"}` per cluster, largest first. The cluster count summary stays on stderr.
 
 Run `qvoid embed` before using this command.
 

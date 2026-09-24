@@ -29,9 +29,10 @@ qvoid query --format json               # Raw JSON output
 qvoid query --format json --fields target,occurrence_count  # Compact JSON; fields: target, normalized, expected_destination, classification_confidence, title_features, occurrences, stats, occurrence_count
 
 qvoid find-similar "query phrase"       # Semantic similarity search (requires embed)
-qvoid find-similar "query phrase" --format json  # NDJSON {target, score} per line (not for --cluster)
+qvoid find-similar "query phrase" --format json  # NDJSON {target, score} per line
 qvoid find-similar --cluster            # Group near-duplicate targets into clusters
 qvoid find-similar --cluster --threshold 0.85
+qvoid find-similar --cluster --format json  # NDJSON {size, threshold, targets} per cluster, largest first
 
 qvoid classify                          # Reclassify low-confidence records using ML model
 qvoid mcp                               # Start MCP server (stdio transport)

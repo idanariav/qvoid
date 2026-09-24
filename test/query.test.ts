@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFields, projectFields, QUERY_FIELDS } from "../src/query.js";
+import { parseFields, projectFields, formatClustersJson, QUERY_FIELDS } from "../src/query.js";
 import type { LinkRecord } from "../src/types.js";
 
 const link = {
@@ -39,5 +39,18 @@ describe("projectFields", () => {
   it("every advertised field is selectable", () => {
     const out = projectFields(link, [...QUERY_FIELDS]);
     expect(Object.keys(out)).toEqual([...QUERY_FIELDS]);
+  });
+});
+
+describe("formatClustersJson", () => {
+  it("emits one NDJSON object per cluster in given order", () => {
+    const lines = formatClustersJson([["a", "b", "c"], ["d", "e"]], 0.82);
+    expect(lines.map((l) => JSON.parse(l))).toEqual([
+      { size: 3, threshold: 0.82, targets: ["a", "b", "c"] },
+      { size: 2, threshold: 0.82, targets: ["d", "e"] },
+    ]);
+  });
+  it("yields nothing for no clusters", () => {
+    expect(formatClustersJson([], 0.82)).toEqual([]);
   });
 });

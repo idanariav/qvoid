@@ -11,7 +11,7 @@ import {
 import { Classifier } from "../classifier.js";
 import { buildIndex, readJsonl, writeJsonl } from "../indexer.js";
 import { buildVectors, clusterDuplicates, findSimilar } from "../embeddings.js";
-import { filterLinks, formatDetailed, formatSummary, parseFields, projectFields } from "../query.js";
+import { filterLinks, formatDetailed, formatSummary, parseFields, projectFields, formatClustersJson } from "../query.js";
 import { startMcp } from "../mcp/server.js";
 import { MlClassifier, MODEL_PATH, TRAINING_DATA_PATH, TRAINING_DIR, loadTrainingData, reclassifyLowConfidence, saveTrainingData } from "../ml-classifier.js";
 
@@ -290,9 +290,13 @@ async function cmdFindSimilar(argv: string[]): Promise<void> {
   if (cluster) {
     const groups = clusterDuplicates(col.vectorsPath, col.manifestPath, threshold);
     groups.sort((a, b) => b.length - a.length);
-    for (const g of groups) {
-      console.log(`\n--- cluster (${g.length} targets)`);
-      for (const t of g) console.log(`  ${t}`);
+    if (flagStr(flags["format"]) === "json") {
+      for (const line of formatClustersJson(groups, threshold)) console.log(line);
+    } else {
+      for (const g of groups) {
+        console.log(`\n--- cluster (${g.length} targets)`);
+        for (const t of g) console.log(`  ${t}`);
+      }
     }
     process.stderr.write(`\n${groups.length} clusters at threshold ${threshold}.\n`);
     return;

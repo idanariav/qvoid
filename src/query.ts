@@ -77,6 +77,11 @@ export function projectFields(link: LinkRecord, fields: string[]): Record<string
   return out;
 }
 
+/** One NDJSON line per cluster (caller sorts). Empty input yields no lines. */
+export function formatClustersJson(groups: string[][], threshold: number): string[] {
+  return groups.map((g) => JSON.stringify({ size: g.length, threshold, targets: g }));
+}
+
 export function formatSummary(links: LinkRecord[]): string {
   const header = `${"count".padStart(5)}  ${"class".padEnd(10)}  ${"conf".padEnd(7)}  target`;
   const divider = "-".repeat(80);
