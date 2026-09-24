@@ -43,6 +43,7 @@ Both in `src/query.ts`:
 | `--search <term>` | `search` |
 | `--limit <n>` | `limit` |
 | `--format summary\|detailed\|json` | selects formatter or raw JSON output |
+| `--fields <a,b,c>` | with `--format json`, projects each object to these top-level fields via `parseFields()` / `projectFields()`. Valid: `target`, `normalized`, `expected_destination`, `classification_confidence`, `title_features`, `occurrences`, `stats`, `occurrence_count` (derived from `stats.total_occurrences`). Unknown names error with the valid list. Default JSON output is unchanged |
 
 ## MCP Server
 
@@ -52,7 +53,7 @@ Both in `src/query.ts`:
 
 | Tool | Core function | Returns |
 |---|---|---|
-| `query` | `filterLinks()` | `LinkRecord[]` as JSON |
+| `query` | `filterLinks()` | `LinkRecord[]` as JSON; optional `fields` array projects each record (same names as `--fields`) |
 | `find_similar` | `findSimilar()` from `embeddings.ts` | `{ target, score }[]` as JSON |
 | `cluster` | `clusterDuplicates()` from `embeddings.ts` | `string[][]` as JSON |
 | `status` | `readJsonl()` + inline aggregation | counts by `expected_destination` and `classification_confidence` |

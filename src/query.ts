@@ -46,6 +46,37 @@ export function filterLinks(links: LinkRecord[], opts: FilterOpts): LinkRecord[]
   return results;
 }
 
+export const QUERY_FIELDS = [
+  "target",
+  "normalized",
+  "expected_destination",
+  "classification_confidence",
+  "title_features",
+  "occurrences",
+  "stats",
+  "occurrence_count",
+] as const;
+
+/** Parse a comma-separated field list; throws listing valid fields on unknown names. */
+export function parseFields(raw: string | string[]): string[] {
+  const fields = (Array.isArray(raw) ? raw : raw.split(",")).map((f) => f.trim()).filter(Boolean);
+  const unknown = fields.filter((f) => !(QUERY_FIELDS as readonly string[]).includes(f));
+  if (fields.length === 0 || unknown.length > 0) {
+    const bad = unknown.length > 0 ? `Unknown field(s): ${unknown.join(", ")}. ` : "No fields given. ";
+    throw new Error(`${bad}Valid fields: ${QUERY_FIELDS.join(", ")}`);
+  }
+  return fields;
+}
+
+/** Project a record to the given top-level fields (`occurrence_count` is derived from stats). */
+export function projectFields(link: LinkRecord, fields: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) {
+    out[f] = f === "occurrence_count" ? link.stats.total_occurrences : (link as unknown as Record<string, unknown>)[f];
+  }
+  return out;
+}
+
 export function formatSummary(links: LinkRecord[]): string {
   const header = `${"count".padStart(5)}  ${"class".padEnd(10)}  ${"conf".padEnd(7)}  target`;
   const divider = "-".repeat(80);

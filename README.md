@@ -130,6 +130,9 @@ qvoid query --search "cognitive bias" --limit 20
 # Output as JSON for scripting
 qvoid query --format json | jq '.target'
 
+# Compact JSON (far smaller than full records)
+qvoid query --destination idea --format json --fields target,occurrence_count
+
 # Detailed view with surrounding sentences
 qvoid query --destination idea --format detailed
 ```
@@ -143,6 +146,7 @@ qvoid query --destination idea --format detailed
 | `--search` | Substring match on target name or surrounding context |
 | `--limit` | Cap the number of results |
 | `--format` | `summary` (default), `detailed`, or `json` |
+| `--fields` | With `--format json`, keep only these comma-separated top-level fields: `target`, `normalized`, `expected_destination`, `classification_confidence`, `title_features`, `occurrences`, `stats`, `occurrence_count`. Unknown names error with the valid list |
 
 ### `find-similar`
 
@@ -152,12 +156,17 @@ Find semantically similar unresolved link targets using vector embeddings. Usefu
 # Find links similar to a query phrase
 qvoid find-similar "seeing reality clearly" --top-k 5
 
+# Machine-readable output: one {"target","score"} JSON object per line
+qvoid find-similar "seeing reality clearly" --format json | jq 'select(.score > 0.5)'
+
 # Group suspected duplicates into clusters
 qvoid find-similar --cluster
 
 # Use a stricter similarity threshold
 qvoid find-similar --cluster --threshold 0.85
 ```
+
+`--format text` (default) or `json` (NDJSON). `--format` applies to query-phrase searches only; `--cluster` always prints text.
 
 Run `qvoid embed` before using this command.
 

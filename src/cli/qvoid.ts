@@ -11,7 +11,7 @@ import {
 import { Classifier } from "../classifier.js";
 import { buildIndex, readJsonl, writeJsonl } from "../indexer.js";
 import { buildVectors, clusterDuplicates, findSimilar } from "../embeddings.js";
-import { filterLinks, formatDetailed, formatSummary } from "../query.js";
+import { filterLinks, formatDetailed, formatSummary, parseFields, projectFields } from "../query.js";
 import { startMcp } from "../mcp/server.js";
 import { MlClassifier, MODEL_PATH, TRAINING_DATA_PATH, TRAINING_DIR, loadTrainingData, reclassifyLowConfidence, saveTrainingData } from "../ml-classifier.js";
 
@@ -250,9 +250,23 @@ function cmdQuery(argv: string[]): void {
   });
 
   const fmt = flagStr(flags["format"]) ?? "summary";
+  const fieldsRaw = flagStr(flags["fields"]);
+  let fields: string[] | undefined;
+  if (fieldsRaw !== undefined) {
+    if (fmt !== "json") {
+      process.stderr.write("--fields requires --format json.\n");
+      process.exit(1);
+    }
+    try {
+      fields = parseFields(fieldsRaw);
+    } catch (e) {
+      process.stderr.write(`${(e as Error).message}\n`);
+      process.exit(1);
+    }
+  }
 
   if (fmt === "json") {
-    for (const link of filtered) console.log(JSON.stringify(link));
+    for (const link of filtered) console.log(JSON.stringify(fields ? projectFields(link, fields) : link));
     return;
   }
   if (fmt === "detailed") {

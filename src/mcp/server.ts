@@ -5,7 +5,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { resolveCollection } from "../config.js";
 import { readJsonl } from "../indexer.js";
 import { clusterDuplicates, findSimilar } from "../embeddings.js";
-import { filterLinks } from "../query.js";
+import { QUERY_FIELDS, filterLinks, parseFields, projectFields } from "../query.js";
 import { DESTINATIONS } from "../types.js";
 
 const require = createRequire(import.meta.url);
@@ -56,6 +56,11 @@ export async function startMcp(): Promise<void> {
             min_occurrences: { type: "number", description: "Minimum occurrence count across the vault" },
             search: { type: "string", description: "Substring match on target name or surrounding context" },
             limit: { type: "number", description: "Cap result count" },
+            fields: {
+              type: "array",
+              items: { type: "string", enum: [...QUERY_FIELDS] },
+              description: "Project each result to these top-level fields (compact output). Omit for full records.",
+            },
           },
         },
       },
@@ -111,6 +116,8 @@ export async function startMcp(): Promise<void> {
         const links = readJsonl(col.jsonlPath);
         const destRaw = args["destination"];
         const destination = Array.isArray(destRaw) ? (destRaw as string[]) : str(destRaw);
+        const fieldsRaw = args["fields"];
+        const fields = Array.isArray(fieldsRaw) ? parseFields(fieldsRaw as string[]) : undefined;
         const filtered = filterLinks(links, {
           destination,
           origin: str(args["origin"]),
@@ -119,7 +126,7 @@ export async function startMcp(): Promise<void> {
           search: str(args["search"]),
           limit: num(args["limit"]),
         });
-        return jsonText(filtered);
+        return jsonText(fields ? filtered.map((l) => projectFields(l, fields)) : filtered);
       } catch (e) {
         return errText(String(e));
       }

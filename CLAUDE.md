@@ -26,8 +26,10 @@ qvoid query --min-occurrences 3         # Minimum occurrence count
 qvoid query --search "term"             # Substring search on target name and context
 qvoid query --format detailed           # Full context view (default: summary)
 qvoid query --format json               # Raw JSON output
+qvoid query --format json --fields target,occurrence_count  # Compact JSON; fields: target, normalized, expected_destination, classification_confidence, title_features, occurrences, stats, occurrence_count
 
 qvoid find-similar "query phrase"       # Semantic similarity search (requires embed)
+qvoid find-similar "query phrase" --format json  # NDJSON {target, score} per line (not for --cluster)
 qvoid find-similar --cluster            # Group near-duplicate targets into clusters
 qvoid find-similar --cluster --threshold 0.85
 
