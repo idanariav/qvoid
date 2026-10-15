@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- **`qvoid embed` now embeds only `idea`-class targets by default** — dates, people, files and templates no longer get vectors (they competed with real notes in mixed rankings and are poor dedup candidates). Configure with `embeddings.classes` in the collection TOML (`[]` embeds all classes). Run `qvoid embed` to drop existing non-idea vectors; `find-similar --cluster` results will narrow accordingly
+
 ### Added
+- **`find-similar --cluster --suggest-canonical`** — flags the most-used target in each cluster (ties go to the alphabetically first) as the likely canonical name. Text output marks it with `*` and shows occurrence counts; JSON adds `canonical` and an `occurrences` map. CLI only; the MCP `cluster` tool is unchanged
 - **`find-similar --cluster --format json`** — emits NDJSON, one `{"size","threshold","targets"}` object per cluster, largest first. Text output remains the default; the summary stays on stderr. The MCP `cluster` tool already returns structured JSON and is unchanged
 - **`query --fields <a,b,c>`** — with `--format json`, projects each NDJSON object to the listed top-level fields (adds derived `occurrence_count`); unknown names error with the valid list. Also available as the `fields` argument of the MCP `query` tool. Default JSON output is unchanged
 - **`find-similar --format json`** — emits NDJSON (`{"target","score"}` per line) for query-phrase searches, matching `query --format json`. `--cluster` remains text-only

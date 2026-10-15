@@ -11,7 +11,7 @@ import {
 import { Classifier } from "../classifier.js";
 import { buildIndex, readJsonl, writeJsonl } from "../indexer.js";
 import { buildVectors, clusterDuplicates, findSimilar } from "../embeddings.js";
-import { filterLinks, formatDetailed, formatSummary, parseFields, projectFields, formatClustersJson } from "../query.js";
+import { filterLinks, formatDetailed, formatSummary, parseFields, projectFields, formatClustersJson, suggestCanonical } from "../query.js";
 import { startMcp } from "../mcp/server.js";
 import { MlClassifier, MODEL_PATH, TRAINING_DATA_PATH, TRAINING_DIR, loadTrainingData, reclassifyLowConfidence, saveTrainingData } from "../ml-classifier.js";
 
@@ -223,8 +223,10 @@ async function cmdEmbed(argv: string[]): Promise<void> {
       if (fs.existsSync(p)) fs.unlinkSync(p);
     }
   }
-  const links = readJsonl(col.jsonlPath);
-  const modelName = col.config.embeddings.model;
+  const { model: modelName, classes } = col.config.embeddings;
+  const links = readJsonl(col.jsonlPath).filter(
+    (l) => classes.length === 0 || classes.includes(l.expected_destination),
+  );
   const mode = force ? "full" : "incremental";
   process.stderr.write(`Embedding ${links.length} records with ${modelName} (${mode})...\n`);
   const onProgress = makeProgressCallback("encoding");
@@ -290,12 +292,18 @@ async function cmdFindSimilar(argv: string[]): Promise<void> {
   if (cluster) {
     const groups = clusterDuplicates(col.vectorsPath, col.manifestPath, threshold);
     groups.sort((a, b) => b.length - a.length);
+    const counts = flags["suggest-canonical"] === true
+      ? new Map(readJsonl(col.jsonlPath).map((l) => [l.target, l.stats.total_occurrences] as const))
+      : undefined;
     if (flagStr(flags["format"]) === "json") {
-      for (const line of formatClustersJson(groups, threshold)) console.log(line);
+      for (const line of formatClustersJson(groups, threshold, counts)) console.log(line);
     } else {
       for (const g of groups) {
         console.log(`\n--- cluster (${g.length} targets)`);
-        for (const t of g) console.log(`  ${t}`);
+        const canonical = counts && suggestCanonical(g, counts);
+        for (const t of g) {
+          console.log(counts ? `  ${t === canonical ? "*" : " "} ${t} (${counts.get(t) ?? 0})` : `  ${t}`);
+        }
       }
     }
     process.stderr.write(`\n${groups.length} clusters at threshold ${threshold}.\n`);

@@ -23,6 +23,7 @@ This means targets with richer occurrence context get more informative embedding
 ## Model
 
 - **Name:** `Xenova/bge-small-en-v1.5` (default; configurable via `embeddings.model` in TOML)
+- **Classes embedded:** `embeddings.classes` in TOML (default `["idea"]`; `[]` = all). Filtering happens in `cmdEmbed` before `buildVectors`, so the manifest shape is unchanged and previously embedded non-matching targets are dropped on the next `embed`
 - **Dimension:** 384
 - **Format:** ONNX, ~25 MB, downloaded once from HuggingFace Hub
 - **Runtime:** `@huggingface/transformers` with `HF_HUB_OFFLINE=1` — never fetches after first download

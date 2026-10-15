@@ -100,7 +100,7 @@ qvoid index --collection vault   # target a specific collection
 
 ### `embed`
 
-Build vector embeddings from the current index. Required before running `find-similar`. Downloads the embedding model (~25 MB) on first use.
+Build vector embeddings from the current index. Required before running `find-similar`. Downloads the embedding model (~25 MB) on first use. Only targets whose class is listed in `embeddings.classes` are embedded (default `["idea"]`; set `classes = []` in the collection TOML to embed every class). Targets of other classes are dropped from the vectors on the next `embed`.
 
 ```bash
 qvoid embed
@@ -165,11 +165,14 @@ qvoid find-similar --cluster
 # Use a stricter similarity threshold
 qvoid find-similar --cluster --threshold 0.85
 
+# Mark the most-used target in each cluster as the suggested canonical name
+qvoid find-similar --cluster --suggest-canonical
+
 # Clusters as NDJSON
 qvoid find-similar --cluster --format json | jq -c .
 ```
 
-`--format text` (default) or `json` (NDJSON). Query-phrase searches emit `{"target","score"}` per line; `--cluster` emits `{"size","threshold","targets"}` per cluster, largest first. The cluster count summary stays on stderr.
+`--format text` (default) or `json` (NDJSON). Query-phrase searches emit `{"target","score"}` per line; `--cluster` emits `{"size","threshold","targets"}` per cluster, largest first. With `--suggest-canonical`, text output marks the most-used target with `*` and shows occurrence counts, and JSON adds `canonical` and an `occurrences` map. The cluster count summary stays on stderr.
 
 Run `qvoid embed` before using this command.
 

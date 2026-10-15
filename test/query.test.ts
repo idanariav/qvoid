@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFields, projectFields, formatClustersJson, QUERY_FIELDS } from "../src/query.js";
+import { parseFields, projectFields, formatClustersJson, suggestCanonical, QUERY_FIELDS } from "../src/query.js";
 import type { LinkRecord } from "../src/types.js";
 
 const link = {
@@ -52,5 +52,20 @@ describe("formatClustersJson", () => {
   });
   it("yields nothing for no clusters", () => {
     expect(formatClustersJson([], 0.82)).toEqual([]);
+  });
+  it("adds canonical and occurrences when counts are given", () => {
+    const counts = new Map([["a", 1], ["b", 4]]);
+    expect(JSON.parse(formatClustersJson([["a", "b"]], 0.82, counts)[0]!)).toEqual({
+      size: 2, threshold: 0.82, targets: ["a", "b"], canonical: "b", occurrences: { a: 1, b: 4 },
+    });
+  });
+});
+
+describe("suggestCanonical", () => {
+  it("picks the most-used target", () => {
+    expect(suggestCanonical(["a", "b", "c"], new Map([["a", 1], ["b", 3], ["c", 2]]))).toBe("b");
+  });
+  it("breaks ties alphabetically", () => {
+    expect(suggestCanonical(["b", "a"], new Map([["a", 2], ["b", 2]]))).toBe("a");
   });
 });

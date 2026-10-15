@@ -38,6 +38,8 @@ const ClassifierSchema = z.strictObject({
 
 const EmbeddingsSchema = z.strictObject({
   model: z.string().default("Xenova/bge-small-en-v1.5"),
+  // Destination classes to embed; an empty list embeds every class.
+  classes: z.array(z.string()).default(["idea"]),
 });
 
 const CollectionConfigSchema = z.strictObject({

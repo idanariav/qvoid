@@ -32,6 +32,7 @@ qvoid find-similar "query phrase"       # Semantic similarity search (requires e
 qvoid find-similar "query phrase" --format json  # NDJSON {target, score} per line
 qvoid find-similar --cluster            # Group near-duplicate targets into clusters
 qvoid find-similar --cluster --threshold 0.85
+qvoid find-similar --cluster --suggest-canonical  # Mark most-used target per cluster (adds canonical + occurrences to JSON)
 qvoid find-similar --cluster --format json  # NDJSON {size, threshold, targets} per cluster, largest first
 
 qvoid classify                          # Reclassify low-confidence records using ML model

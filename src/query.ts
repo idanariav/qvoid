@@ -77,9 +77,25 @@ export function projectFields(link: LinkRecord, fields: string[]): Record<string
   return out;
 }
 
-/** One NDJSON line per cluster (caller sorts). Empty input yields no lines. */
-export function formatClustersJson(groups: string[][], threshold: number): string[] {
-  return groups.map((g) => JSON.stringify({ size: g.length, threshold, targets: g }));
+/** Most-used target in a cluster; ties go to the alphabetically first. Missing counts count as 0. */
+export function suggestCanonical(group: string[], counts: Map<string, number>): string {
+  return [...group].sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0) || a.localeCompare(b))[0]!;
+}
+
+/**
+ * One NDJSON line per cluster (caller sorts). Empty input yields no lines.
+ * With `counts`, each line also carries the suggested `canonical` target and per-target `occurrences`.
+ */
+export function formatClustersJson(groups: string[][], threshold: number, counts?: Map<string, number>): string[] {
+  return groups.map((g) => JSON.stringify({
+    size: g.length,
+    threshold,
+    targets: g,
+    ...(counts && {
+      canonical: suggestCanonical(g, counts),
+      occurrences: Object.fromEntries(g.map((t) => [t, counts.get(t) ?? 0])),
+    }),
+  }));
 }
 
 export function formatSummary(links: LinkRecord[]): string {
