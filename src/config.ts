@@ -42,10 +42,17 @@ const EmbeddingsSchema = z.strictObject({
   classes: z.array(z.string()).default(["idea"]),
 });
 
+const ExportSchema = z.strictObject({
+  // Output directory for `qvoid export`, relative to the vault (or absolute). When set,
+  // `qvoid index` and `qvoid embed` re-export at the end.
+  path: z.string(),
+});
+
 const CollectionConfigSchema = z.strictObject({
   source: SourceSchema.default(SourceSchema.parse({})),
   classifier: ClassifierSchema.default(ClassifierSchema.parse({})),
   embeddings: EmbeddingsSchema.default(EmbeddingsSchema.parse({})),
+  export: ExportSchema.optional(),
 });
 
 export type CollectionConfig = z.infer<typeof CollectionConfigSchema>;

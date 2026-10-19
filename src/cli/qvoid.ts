@@ -11,6 +11,7 @@ import {
 import { Classifier } from "../classifier.js";
 import { buildIndex, readJsonl, writeJsonl } from "../indexer.js";
 import { buildVectors, clusterDuplicates, findSimilar } from "../embeddings.js";
+import { exportCollection, resolveExportDir } from "../export.js";
 import { filterLinks, formatDetailed, formatSummary, parseFields, projectFields, formatClustersJson, suggestCanonical } from "../query.js";
 import { startMcp } from "../mcp/server.js";
 import { MlClassifier, MODEL_PATH, TRAINING_DATA_PATH, TRAINING_DIR, loadTrainingData, reclassifyLowConfidence, saveTrainingData } from "../ml-classifier.js";
@@ -211,6 +212,7 @@ async function cmdIndex(argv: string[]): Promise<void> {
 
   writeJsonl(links, col.jsonlPath);
   process.stderr.write(`Wrote ${links.length} records → ${col.jsonlPath}\n`);
+  await autoExport(col);
 }
 
 async function cmdEmbed(argv: string[]): Promise<void> {
@@ -233,6 +235,33 @@ async function cmdEmbed(argv: string[]): Promise<void> {
   await buildVectors(links, col.vectorsPath, col.manifestPath, modelName, onProgress);
   finishProgress();
   process.stderr.write(`Wrote vectors → ${col.vectorsPath}\n`);
+  await autoExport(col);
+}
+
+async function runExport(col: Collection, outDir: string): Promise<void> {
+  const r = await exportCollection(col, outDir);
+  process.stderr.write(
+    `Exported ${r.records} records, ${r.items} vectors, ${r.words} words (${r.newlyEmbedded} newly embedded) ` +
+    `→ ${r.outDir} (${(r.bytes / 1e6).toFixed(1)} MB)\n`,
+  );
+}
+
+/** Re-export after index/embed when `[export] path` is configured. */
+async function autoExport(col: Collection): Promise<void> {
+  const outDir = resolveExportDir(col);
+  if (outDir) await runExport(col, outDir);
+}
+
+async function cmdExport(argv: string[]): Promise<void> {
+  const { flags } = parseArgs(argv);
+  const col = resolveCollection(flagStr(flags["collection"]));
+  requireIndex(col);
+  const outDir = resolveExportDir(col, flagStr(flags["out"]));
+  if (!outDir) {
+    process.stderr.write("No export directory: pass --out <dir> or set [export] path in the collection config.\n");
+    process.exit(1);
+  }
+  await runExport(col, outDir);
 }
 
 function cmdQuery(argv: string[]): void {
@@ -481,7 +510,7 @@ async function cmdClassifierTrain(argv: string[]): Promise<void> {
 
 const USAGE =
   "Usage: qvoid <command> [...args]\n" +
-  "Commands: collections, collection, index, embed, query, find-similar, classify, classifier [train|retrain], mcp";
+  "Commands: collections, collection, index, embed, export, query, find-similar, classify, classifier [train|retrain], mcp";
 
 async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv;
@@ -495,6 +524,7 @@ async function main(): Promise<void> {
       case "collection":  cmdCollection(rest); break;
       case "index":       await cmdIndex(rest); break;
       case "embed":       await cmdEmbed(rest); break;
+      case "export":      await cmdExport(rest); break;
       case "query":       cmdQuery(rest); break;
       case "find-similar": await cmdFindSimilar(rest); break;
       case "classify":    await cmdClassify(rest); break;

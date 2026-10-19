@@ -5,12 +5,23 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./query": {
+      "import": "./dist/query.js",
+      "types": "./dist/query.d.ts"
+    }
+  },
   "bin": {
     "qvoid": "bin/qvoid"
   },
   "files": [
     "bin/",
     "dist/",
+    "assets/common-words.txt",
     "models/",
     "training/",
     "LICENSE",

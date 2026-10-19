@@ -17,6 +17,7 @@ qvoid index                             # Build / refresh link index (incrementa
 qvoid index --force                     # Full rebuild, ignoring scan manifest
 qvoid embed                             # Generate vector embeddings (required for find-similar)
 qvoid embed --force                     # Rebuild all embeddings from scratch
+qvoid export [--out <dir>]              # Portable int8 export into a vault folder (docs/EXPORT.md)
 
 qvoid query                             # List all unresolved links
 qvoid query --destination idea          # Filter by type: idea | person | date | file | template | unknown (comma-separated for OR)
@@ -83,3 +84,4 @@ Subsystem docs:
 | Vector embeddings, similarity, clustering | [docs/EMBEDDING.md](docs/EMBEDDING.md) |
 | filterLinks, formatters, MCP tools | [docs/QUERYING.md](docs/QUERYING.md) |
 | TOML schema, collection resolution | [docs/CONFIG.md](docs/CONFIG.md) |
+| Portable export for clients without qvoid | [docs/EXPORT.md](docs/EXPORT.md) |

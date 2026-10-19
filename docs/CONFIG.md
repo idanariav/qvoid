@@ -16,7 +16,7 @@ Path helpers are in `src/paths.ts`: `configDir()`, `dataDir()`, `registryPath()`
 
 ## Config Schema
 
-`CollectionConfigSchema` (a zod schema) in `src/config.ts` defines three sections; `DEFAULT_CONFIG` is `CollectionConfigSchema.parse({})`.
+`CollectionConfigSchema` (a zod schema) in `src/config.ts` defines three sections plus an optional `[export]`; `DEFAULT_CONFIG` is `CollectionConfigSchema.parse({})`.
 
 ### `[source]`
 | Key | Default | Description |
@@ -49,6 +49,11 @@ Path helpers are in `src/paths.ts`: `configDir()`, `dataDir()`, `registryPath()`
 | Key | Default | Description |
 |---|---|---|
 | `model` | `"Xenova/bge-small-en-v1.5"` | HuggingFace model name for `buildVectors` / `findSimilar` |
+
+### `[export]` (optional)
+| Key | Default | Description |
+|---|---|---|
+| `path` | — | Output directory for `qvoid export`, relative to the vault or absolute. When set, `index` and `embed` re-export at the end. See [EXPORT.md](EXPORT.md) |
 
 ## Validation
 

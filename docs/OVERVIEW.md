@@ -12,6 +12,7 @@ qvoid indexes every `[[wikilink]]` in an Obsidian-style markdown vault, identifi
 | `src/classifier.ts` | Two-pass heuristic classifier (title features + context boost) |
 | `src/embeddings.ts` | ONNX embedding model, vector storage, cosine similarity, duplicate clustering |
 | `src/query.ts` | `filterLinks`, sort/format helpers |
+| `src/export.ts` | Portable int8 export into a vault folder ([EXPORT.md](EXPORT.md)) |
 | `src/config.ts` | Collection registry, TOML merge, `Collection` class with computed paths |
 | `src/paths.ts` | XDG base directory helpers |
 | `src/mcp/server.ts` | MCP tool wiring (`query`, `find_similar`, `cluster`, `status`) |
@@ -31,6 +32,9 @@ vault .md files
 (optional embedding step)
   → buildVectors()           [embeddings.ts] → vectors.bin + manifest.json
 
+(optional export step — also runs after index/embed when [export] path is set)
+  → exportCollection()       [export.ts]    → <vault>/<export path>/{records.jsonl, vectors.bin, manifest.json}
+
 (query / MCP)
   → readJsonl() → filterLinks()  [query.ts]
   → findSimilar() / clusterDuplicates()  [embeddings.ts]
@@ -47,6 +51,7 @@ vault .md files
 | `~/.local/share/qvoid/<name>/vectors.bin` | Flat Float32Array of all target embeddings |
 | `~/.local/share/qvoid/<name>/manifest.json` | `VectorManifest` — model, dim, count, ordered target list |
 | `~/.local/share/qvoid/<name>/scan_manifest.json` | File mtimes — drives incremental rebuild detection |
+| `<vault>/<[export] path>/` | Optional portable export (`records.jsonl`, int8 `vectors.bin`, `manifest.json`) |
 
 Paths are derived from `Collection` getters defined in `src/config.ts`; use those rather than constructing paths manually.
 
@@ -57,4 +62,5 @@ Paths are derived from `Collection` getters defined in `src/config.ts`; use thos
 - [CLASSIFICATION.md](CLASSIFICATION.md) — Heuristic classifier decision tree
 - [EMBEDDING.md](EMBEDDING.md) — Vector pipeline, similarity search, clustering
 - [QUERYING.md](QUERYING.md) — Filtering, formatters, MCP tools
+- [EXPORT.md](EXPORT.md) — Portable export for clients without qvoid
 - [CONFIG.md](CONFIG.md) — TOML schema, merge rules, collection resolution

@@ -52,7 +52,7 @@ function normalizeVec(v: Float32Array): Float32Array {
   return out;
 }
 
-interface VectorManifest {
+export interface VectorManifest {
   model: string;
   dim: number;
   count: number;
@@ -61,7 +61,7 @@ interface VectorManifest {
   hashes?: string[];
 }
 
-function loadVectors(vectorsPath: string, manifestPath: string): { vectors: Float32Array[]; manifest: VectorManifest } {
+export function loadVectors(vectorsPath: string, manifestPath: string): { vectors: Float32Array[]; manifest: VectorManifest } {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as VectorManifest;
   const buf = fs.readFileSync(vectorsPath);
   const raw = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
@@ -71,6 +71,19 @@ function loadVectors(vectorsPath: string, manifestPath: string): { vectors: Floa
     vectors.push(raw.subarray(i * dim, (i + 1) * dim));
   }
   return { vectors, manifest };
+}
+
+/** Embeds raw texts (no prefix, mean-pooled, normalized) — the same treatment `findSimilar` gives a free-text query. */
+export async function embedTexts(texts: string[], modelName: string, batchSize = 64): Promise<Float32Array[]> {
+  const pipe = await loadModel(modelName) as (texts: string[], opts: unknown) => Promise<HFTensor>;
+  const out: Float32Array[] = [];
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize);
+    const outputs = await pipe(batch, { pooling: "mean", normalize: true });
+    const hiddenDim = outputs.dims[1] ?? outputs.data.length / batch.length;
+    for (let j = 0; j < batch.length; j++) out.push(outputs.data.slice(j * hiddenDim, (j + 1) * hiddenDim));
+  }
+  return out;
 }
 
 export async function buildVectors(

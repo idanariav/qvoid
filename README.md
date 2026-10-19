@@ -106,6 +106,14 @@ Build vector embeddings from the current index. Required before running `find-si
 qvoid embed
 ```
 
+### `export`
+
+Write a portable int8 copy of the index and vectors into a vault folder, so clients without qvoid (e.g. the pkm-rag plugin on mobile) can still query and find similar targets. Set `[export] path` in the collection TOML to re-export automatically after `index` and `embed`. See [docs/EXPORT.md](docs/EXPORT.md).
+
+```bash
+qvoid export --out Scaffolding/Embeddings/qvoid
+```
+
 ### `query`
 
 Filter and search the index by type, folder, annotation, or free text:
