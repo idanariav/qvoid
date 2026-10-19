@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-19
+
 ### Changed
 - **`qvoid embed` now embeds only `idea`-class targets by default** — dates, people, files and templates no longer get vectors (they competed with real notes in mixed rankings and are poor dedup candidates). Configure with `embeddings.classes` in the collection TOML (`[]` embeds all classes). Run `qvoid embed` to drop existing non-idea vectors; `find-similar --cluster` results will narrow accordingly
 
