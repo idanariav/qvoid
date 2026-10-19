@@ -6,11 +6,13 @@ import { embedTexts, loadVectors } from "./embeddings.js";
 import { readJsonl } from "./indexer.js";
 import type { LinkRecord } from "./types.js";
 
-// Portable export ("pkm-vectors" v1, same layout as `qmd export`) so clients without qvoid
+// Portable export ("pkm-vectors" v2, same layout as `qmd export`) so clients without qvoid
 // installed — the pkm-rag plugin on mobile — can run `query` and `find-similar`. See docs/EXPORT.md.
 
 export const EXPORT_FORMAT = "pkm-vectors";
-export const EXPORT_VERSION = 1;
+export const EXPORT_VERSION = 2;
+// Each vector file stays under Obsidian Sync's 5 MB per-file limit (Standard plan).
+export const MAX_CHUNK_BYTES = 4 * 1024 * 1024;
 const SCALE = 127;
 const WORD_RE = /[a-z]{3,20}/g;
 const TEXT_WORD_MIN_COUNT = 3;
@@ -24,8 +26,32 @@ export interface ExportManifest {
   dim: number;
   scale: number;
   exportedAt: string;
-  items: string[];   // targets, same order as their rows in vectors.bin
+  files: string[];   // vector chunks, concatenated in this order
+  items: string[];   // targets, same order as their vector rows
   words: string[];   // rows after the items
+}
+
+/** Writes `bin` as row-aligned chunks `vectors-0.bin`, `vectors-1.bin`, … (each at most
+ *  MAX_CHUNK_BYTES) and deletes vector files of earlier exports the new set doesn't include. */
+export function writeVectorChunks(outDir: string, bin: Int8Array, dim: number): string[] {
+  const chunkBytes = Math.max(1, Math.floor(MAX_CHUNK_BYTES / Math.max(dim, 1))) * Math.max(dim, 1);
+  const files: string[] = [];
+  for (let off = 0; off < bin.length || files.length === 0; off += chunkBytes) {
+    const part = bin.subarray(off, Math.min(bin.length, off + chunkBytes));
+    const name = `vectors-${files.length}.bin`;
+    fs.writeFileSync(path.join(outDir, name), Buffer.from(part.buffer, part.byteOffset, part.byteLength));
+    files.push(name);
+  }
+  for (const f of fs.readdirSync(outDir)) {
+    if (/^vectors(-\d+)?\.bin$/.test(f) && !files.includes(f)) fs.unlinkSync(path.join(outDir, f));
+  }
+  return files;
+}
+
+/** An export's vector bytes: v2's `files` chunks in order, or v1's single `vectors.bin`. */
+export function readVectorBytes(outDir: string, manifest: { files?: string[] }): Buffer | null {
+  const paths = (manifest.files ?? ["vectors.bin"]).map((f) => path.join(outDir, f));
+  return paths.every((p) => fs.existsSync(p)) ? Buffer.concat(paths.map((p) => fs.readFileSync(p))) : null;
 }
 
 /** Embeds raw texts with the collection's model; injectable so tests don't need the model. */
@@ -83,12 +109,12 @@ export function resolveExportDir(col: Collection, out?: string): string | undefi
 function previousWordVectors(outDir: string, model: string, dim: number): Map<string, Int8Array> {
   const prev = new Map<string, Int8Array>();
   const manifestPath = path.join(outDir, "manifest.json");
-  const binPath = path.join(outDir, "vectors.bin");
-  if (!fs.existsSync(manifestPath) || !fs.existsSync(binPath)) return prev;
+  if (!fs.existsSync(manifestPath)) return prev;
   try {
     const m = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as ExportManifest;
     if (m.format !== EXPORT_FORMAT || m.model !== model || m.dim !== dim) return prev;
-    const bin = fs.readFileSync(binPath);
+    const bin = readVectorBytes(outDir, m);
+    if (!bin) return prev;
     m.words.forEach((w, i) => {
       prev.set(w, new Int8Array(bin.buffer, bin.byteOffset + (m.items.length + i) * dim, dim));
     });
@@ -144,12 +170,12 @@ export async function exportCollection(
   const bin = new Int8Array((itemVecs.length + words.length) * dim);
   itemVecs.forEach((v, i) => bin.set(v, i * dim));
   words.forEach((w, i) => bin.set(wordVecs.get(w)!, (itemVecs.length + i) * dim));
+  fs.copyFileSync(col.jsonlPath, path.join(outDir, "records.jsonl"));
+  const files = writeVectorChunks(outDir, bin, dim);
   const manifest: ExportManifest = {
     format: EXPORT_FORMAT, version: EXPORT_VERSION, tool: "qvoid", collection: col.name,
-    model, dim, scale: SCALE, exportedAt: new Date().toISOString(), items, words,
+    model, dim, scale: SCALE, exportedAt: new Date().toISOString(), files, items, words,
   };
-  fs.copyFileSync(col.jsonlPath, path.join(outDir, "records.jsonl"));
-  fs.writeFileSync(path.join(outDir, "vectors.bin"), Buffer.from(bin.buffer));
   fs.writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest));
 
   return {

@@ -2,7 +2,7 @@
 
 Writes a compact copy of a collection's link index and vectors into a vault folder, so clients
 that can't run qvoid (the pkm-rag plugin on mobile, or a desktop without qvoid) can still run
-`query` and `find-similar`. Target vectors are read from `vectors.bin`, not re-embedded. Only the
+`query` and `find-similar`. Target vectors are read from qvoid's own `vectors.bin`, not re-embedded. Only the
 word table (below) is embedded.
 
 ```sh
@@ -17,21 +17,22 @@ Collection TOML. When `path` is set, `qvoid index` and `qvoid embed` re-export a
 path = "Scaffolding/Embeddings/qvoid"   # relative to the vault, or absolute
 ```
 
-## Format: `pkm-vectors` v1
+## Format: `pkm-vectors` v2
 
 Same layout as `qmd export`, plus the records file:
 
 - `records.jsonl` is a byte copy of `unresolved_links.jsonl`, so `filterLinks` / `projectFields`
   (published as `@idan_ariav/qvoid/query`) run on it unchanged.
-- `vectors.bin` is int8, row-major, `dim` bytes per row: all `items` first, then all `words`.
+- `vectors-0.bin`, `vectors-1.bin`, … are int8, row-major, `dim` bytes per row: all `items` first, then all `words`, split on row boundaries into files of at most 4 MiB (Obsidian Sync's Standard plan skips files over 5 MB). Concatenate the files in manifest `files` order. Format v1 (before qmd 2.6 / qvoid 0.6 / qimg 0.5) wrote one `vectors.bin` and had no `files`; readers should accept both.
 - `manifest.json`:
 
 ```jsonc
 {
-  "format": "pkm-vectors", "version": 1, "tool": "qvoid", "collection": "vault",
+  "format": "pkm-vectors", "version": 2, "tool": "qvoid", "collection": "vault",
   "model": "Xenova/bge-small-en-v1.5", "dim": 384, "scale": 127,
   "exportedAt": "<ISO date>",
-  "items": ["<target>", "…"],   // embedded targets (embeddings.classes), in vectors.bin order
+  "files": ["vectors-0.bin", "vectors-1.bin"],
+  "items": ["<target>", "…"],   // embedded targets (embeddings.classes), in vector-row order
   "words": ["ability", "…"]
 }
 ```
